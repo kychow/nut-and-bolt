@@ -11,6 +11,7 @@ const SMOOTHING := 8.0
 
 var _left_pivot: Node3D
 var _right_pivot: Node3D
+var _stride: float = 0.0
 
 func _ready() -> void:
 	_setup_input_actions()
@@ -21,13 +22,29 @@ func _ready() -> void:
 func _physics_process(delta: float) -> void:
 	var left_pressed := Input.is_action_pressed("left_leg")
 	var right_pressed := Input.is_action_pressed("right_leg")
-	var left_target := SWING_ANGLE if left_pressed else 0.0
-	var right_target := SWING_ANGLE if right_pressed else 0.0
-
-	_left_pivot.rotation.x = lerpf(_left_pivot.rotation.x, left_target, SMOOTHING * delta)
-	_right_pivot.rotation.x = lerpf(_right_pivot.rotation.x, right_target, SMOOTHING * delta)
-
-	if left_pressed or right_pressed:
+	var both_pressed := left_pressed and right_pressed
+	var any_pressed := left_pressed or right_pressed
+	
+	# ---- Both keys held: legs freeze in place ----
+	if both_pressed:
+		# _stride stays exactly where it is; no lerp applied.
+		pass
+	else:
+		# Exactly one key pressed (or none): update stride toward target
+		if any_pressed and not both_pressed:
+			# Single‑key drive: +1 for left (A), −1 for right (D)
+			var drive := 1.0 if left_pressed else -1.0
+			var target := drive * SWING_ANGLE
+			_stride = lerpf(_stride, target, SMOOTHING * delta)
+		# If no keys are pressed, _stride retains its current angle
+		# ("hold the stride" — no automatic return to 0).
+	
+	# Apply mirrored rotation to both legs – same rate, opposite direction
+	_left_pivot.rotation.x = _stride
+	_right_pivot.rotation.x = -_stride
+	
+	# Forward motion only while legs are still swinging (not at max rotation)
+	if any_pressed and not both_pressed and abs(_stride) < SWING_ANGLE - 0.02:
 		position.z -= move_speed * delta
 
 func _setup_input_actions() -> void:

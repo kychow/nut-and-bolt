@@ -78,6 +78,53 @@ func _setup_floor() -> void:
 	start.position = Vector3(0, 0.11, 0)
 	add_child(start)
 
+	_add_distance_markers()
+
+func _add_distance_markers() -> void:
+	for i in range(1, 32):
+		var distance := i * 10
+		var z := -float(distance)
+
+		var stripe_material := StandardMaterial3D.new()
+		if distance % 50 == 0:
+			stripe_material.albedo_texture = _grid_texture()
+			stripe_material.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		else:
+			stripe_material.albedo_color = Color.WHITE
+
+		var stripe := MeshInstance3D.new()
+		var stripe_box := BoxMesh.new()
+		stripe_box.size = Vector3(12, 0.05, 0.3)
+		stripe.mesh = stripe_box
+		stripe.name = "DistanceMark_%d" % distance
+		stripe.material_override = stripe_material
+		stripe.position = Vector3(0, 0.11, z)
+		add_child(stripe)
+
+		var post := Node3D.new()
+		post.name = "DistancePost_%d" % distance
+		post.position = Vector3(7.4, 0, z)
+		add_child(post)
+
+		var pole := MeshInstance3D.new()
+		var pole_box := BoxMesh.new()
+		pole_box.size = Vector3(0.12, 0.75, 0.12)
+		pole.mesh = pole_box
+		pole.position = Vector3(0, 0.375, 0)
+		pole.material_override = _material(Color(0.25, 0.25, 0.28))
+		post.add_child(pole)
+
+		var label := Label3D.new()
+		label.text = "%d m" % distance
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 48
+		label.pixel_size = 0.01
+		label.outline_size = 10
+		label.outline_modulate = Color(0.12, 0.12, 0.14, 0.9)
+		label.modulate = Color.WHITE
+		label.position = Vector3(0, 0.85, 0)
+		post.add_child(label)
+
 func _strip(width: float, height: float, length: float, color: Color, x: float, y: float, z: float, label: String) -> MeshInstance3D:
 	var mesh := MeshInstance3D.new()
 	var box := BoxMesh.new()
