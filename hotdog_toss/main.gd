@@ -408,7 +408,6 @@ var _debug_nodes: Array[Node3D] = []
 # 0 = no skin (primitives visible); 1..SKIN_DEFS.size() = SKIN_DEFS[index-1].
 var _current_skin_index: int = 0
 var _head_skin_root: Node3D = null
-var _body_skin_root: Node3D = null
 var _skin_label: Label
 
 func _ready() -> void:
@@ -1619,9 +1618,6 @@ func _teardown_skin() -> void:
 	if _head_skin_root:
 		_head_skin_root.queue_free()
 		_head_skin_root = null
-	if _body_skin_root:
-		_body_skin_root.queue_free()
-		_body_skin_root = null
 
 func _set_primitives_visible(is_visible: bool) -> void:
 	for arm in [_arm_left, _arm_right]:
@@ -1739,26 +1735,27 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	add_child(static_inst)
 	_head_skin_root = static_inst
 
-	_setup_body_skin(def, source_skeleton, source_mesh_inst.mesh, head_idx, head_rest)
+	_setup_body_skin(def, source_skeleton, source_mesh_inst.mesh, head_idx, static_inst)
 
 	if bbox.size != Vector3.ZERO:
 		_apply_head_mouth_hole(static_inst, bbox, head_scale)
 
 ## Gives the floating head an actual body — everything but the head and
 ## arms (see _extract_body_mesh) from the SAME source mesh, in the SAME
-## bind-pose coordinate space, so it attaches at the neck with no seam
-## using the exact same rest-pose basis the head itself uses. Unlike the
-## head/arms (each independently scaled to fit this game's own geometry —
-## see SKIN_DEFS), the body's scale is derived, not hand-measured: whatever
-## uniform factor makes the body's own natural (neck-to-feet) height exactly
-## span the visible gap from HEAD_POS down to the tabletop, so it always
-## reaches the table regardless of a given rig's real proportions. Also
-## builds a matching STATIC collision hull (a convex hull, not a concave
-## trimesh — see _make_funnel_pit's own comment on why a hand-built concave
-## shape gave zero collision response under Jolt) on LAYER_FACE, the same
-## layer the head itself collides on, so hotdogs/arms already masked for
-## that layer bounce off it with no extra collision-mask setup.
-func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh: Mesh, head_idx: int, head_rest: Transform3D) -> void:
+## bind-pose coordinate space, added as a CHILD of the head's own
+## MeshInstance3D with an identity local transform, so it inherits that
+## exact same scaled_basis/HEAD_POS-anchored transform rather than getting
+## an independently derived one — head and body read as the same avatar
+## instance at the same scale, just showing more of it below the neck,
+## instead of a separately-resized statue bolted on underneath (freeing
+## _head_skin_root in _teardown_skin cleans this up too, no separate
+## tracking var needed). Also builds a matching STATIC collision hull (a
+## convex hull, not a concave trimesh — see _make_funnel_pit's own comment
+## on why a hand-built concave shape gave zero collision response under
+## Jolt) on LAYER_FACE, the same layer the head itself collides on, so
+## hotdogs/arms already masked for that layer bounce off it with no extra
+## collision-mask setup.
+func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh: Mesh, head_idx: int, head_mesh_inst: MeshInstance3D) -> void:
 	var excluded_bones := [head_idx]
 	for side_bones in [def["left_arm_bones"], def["right_arm_bones"]]:
 		for key in ["upper", "fore", "hand"]:
@@ -1769,27 +1766,10 @@ func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh:
 	var body_mesh := _extract_body_mesh(source_mesh, excluded_bones)
 	if body_mesh.get_surface_count() == 0:
 		return
-	var body_bbox: AABB = body_mesh.get_aabb()
-	if body_bbox.size.y <= 0.0:
-		return
-
-	var body_top_local := Vector3(
-		body_bbox.position.x + body_bbox.size.x * 0.5,
-		body_bbox.position.y + body_bbox.size.y,
-		body_bbox.position.z + body_bbox.size.z * 0.5,
-	)
-	var body_scale := (HEAD_POS.y - TABLE_TOP_Y) / body_bbox.size.y
-	var body_basis := head_rest.basis.scaled(Vector3.ONE * body_scale)
-	var body_transform := Transform3D(body_basis, HEAD_POS - body_basis * body_top_local)
-
-	var body_container := Node3D.new()
-	body_container.transform = body_transform
-	add_child(body_container)
-	_body_skin_root = body_container
 
 	var body_mesh_inst := MeshInstance3D.new()
 	body_mesh_inst.mesh = body_mesh
-	body_container.add_child(body_mesh_inst)
+	head_mesh_inst.add_child(body_mesh_inst)
 
 	var body_static := StaticBody3D.new()
 	body_static.name = "SkinBody"
@@ -1799,7 +1779,7 @@ func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh:
 	var body_coll := CollisionShape3D.new()
 	body_coll.shape = body_mesh.create_convex_shape(true, false)
 	body_static.add_child(body_coll)
-	body_container.add_child(body_static)
+	head_mesh_inst.add_child(body_static)
 
 const MOUTH_HOLE_SHADER_CODE := "
 shader_type spatial;
