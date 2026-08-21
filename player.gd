@@ -5,15 +5,15 @@ extends Node3D
 @export_range(0.0, 1.5, 0.05)
 var swing_angle := -0.65
 
-# Added knee bend angle. Usually negative if swing is positive.
 @export_range(-2.0, 1.5, 0.05)
 var knee_bend_angle := 1.0 
 
 @export_range(1.0, 30.0, 0.5)
-var smoothing := 10.0
+var smoothing := 15.0
 
-@export_group("Movement")
-@export var move_speed := 5.0 # Speed at which the player moves forward
+@export_group("Movement & Pace")
+@export var move_speed := 5.0 
+@export var pace_frequency := 12.0 # How fast the legs cycle per second
 
 @export_group("Character")
 @export var character_scale := 1.0
@@ -32,11 +32,14 @@ var right_neutral := Quaternion.IDENTITY
 var left_shin_neutral := Quaternion.IDENTITY
 var right_shin_neutral := Quaternion.IDENTITY
 
+# Run Pace Variables
+var stride_phase := 0.0
+var current_speed := 0.0
+
 func _ready() -> void:
 	_load_character()
 	_find_skeleton()
 	_setup_bones()
-
 
 func _load_character() -> void:
 	var glb_scene := load("res://assets/jamaican-sprinter-rigged.glb")
@@ -53,6 +56,7 @@ func _load_character() -> void:
 
 	character.name = "Bolt"
 	character.scale = Vector3.ONE * character_scale
+	character.position.y += 0.032
 	character.rotation_degrees.y = 180
 
 	add_child(character)
