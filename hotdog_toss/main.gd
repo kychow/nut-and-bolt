@@ -62,8 +62,6 @@ const HAND_RADIUS := 0.05
 const HAND_LEN := 0.05
 const MAX_REACH := UPPER_ARM_LEN + FOREARM_LEN
 
-const WRIST_LIMIT_DEG := 30.0
-
 const GRAB_RADIUS := 0.08
 
 const TABLE_TOP_Y := 1.05
@@ -850,14 +848,23 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.elbow_joint.node_b = arm.elbow_joint.get_path_to(arm.forearm)
 	arm.elbow_joint.exclude_nodes_from_collision = true
 
-	# Wrist: Generic6DOFJoint3D, linear locked + modest angular limits.
+	# Wrist: Generic6DOFJoint3D, linear locked but now free on all angular
+	# axes too (previously a 30-degree cone) — that limit meant the hand
+	# could only ever point within 30 degrees of wherever the forearm
+	# itself happened to be aimed, and since nothing now actively steers
+	# the forearm's own orientation (the elbow is a free hinge too), the
+	# whole arm tended to hang/extend in one narrow range of directions,
+	# making hotdogs that needed an awkward approach angle (e.g. toward
+	# the back of a funnel) effectively unreachable. Same treatment as the
+	# elbow: the joint still fixes the wrist's POSITION, only the angle
+	# around it is unconstrained.
 	var wrist_joint := Generic6DOFJoint3D.new()
 	add_child(wrist_joint)
 	wrist_joint.global_transform = Transform3D(rest_basis, wrist_pos)
 	wrist_joint.node_a = wrist_joint.get_path_to(arm.forearm)
 	wrist_joint.node_b = wrist_joint.get_path_to(arm.hand)
 	wrist_joint.exclude_nodes_from_collision = true
-	_configure_6dof(wrist_joint, WRIST_LIMIT_DEG)
+	_configure_6dof(wrist_joint, -1.0)
 
 	arm.target_pos = shoulder_pos + _rest_dir * (MAX_REACH * 0.7)
 
@@ -868,7 +875,7 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 		"target": arm.target_pos,
 	}
 
-	_setup_debug_visuals(arm, wrist_pos, rest_basis)
+	_setup_debug_visuals(arm)
 	return arm
 
 func _setup_table_and_pyramids() -> void:
@@ -1827,43 +1834,15 @@ func _make_wire_arc(radius: float, start_deg: float, end_deg: float) -> MeshInst
 		st.add_vertex(Vector3.ZERO)
 	)
 
-func _make_wire_cone(half_angle_deg: float, length: float) -> MeshInstance3D:
-	return _make_wire_mesh(func(st: SurfaceTool) -> void:
-		var ring_radius := length * tan(deg_to_rad(half_angle_deg))
-		var apex := Vector3.ZERO
-		var tip := Vector3.FORWARD * length
-		var segments := 16
-		var prev := Vector3.ZERO
-		for i in range(segments + 1):
-			var a := (float(i) / segments) * TAU
-			var p := tip + Vector3.RIGHT * cos(a) * ring_radius + Vector3.UP * sin(a) * ring_radius
-			if i > 0:
-				st.add_vertex(prev)
-				st.add_vertex(p)
-			prev = p
-		for i in range(4):
-			var a := (float(i) / 4) * TAU
-			var p := tip + Vector3.RIGHT * cos(a) * ring_radius + Vector3.UP * sin(a) * ring_radius
-			st.add_vertex(apex)
-			st.add_vertex(p)
-	)
-
-func _setup_debug_visuals(arm: ArmState, wrist_pos: Vector3, rest_basis: Basis) -> void:
+func _setup_debug_visuals(arm: ArmState) -> void:
 	var reach_sphere := _make_wire_sphere(MAX_REACH)
 	reach_sphere.position = arm.shoulder_pos
 	add_child(reach_sphere)
 	_debug_nodes.append(reach_sphere)
 
-	# No elbow limit arc here anymore — the elbow is a free hinge with no
-	# angle limit (see _setup_arm), so there's no bound left to illustrate.
-
-	# Wrist limit cone, parented to the forearm the same way.
-	var wrist_cone := _make_wire_cone(WRIST_LIMIT_DEG, 0.15)
-	var wrist_local_basis: Basis = arm.forearm.global_transform.basis.inverse() * rest_basis
-	var wrist_local_pos: Vector3 = arm.forearm.global_transform.basis.inverse() * (wrist_pos - arm.forearm.global_position)
-	wrist_cone.transform = Transform3D(wrist_local_basis, wrist_local_pos)
-	arm.forearm.add_child(wrist_cone)
-	_debug_nodes.append(wrist_cone)
+	# No elbow limit arc or wrist limit cone here anymore — both are now
+	# free joints with no angle limit (see _setup_arm), so there's no
+	# bound left to illustrate for either.
 
 	# Hand grab radius, parented to the hand so it tracks automatically.
 	var grab_sphere_debug := _make_wire_sphere(GRAB_RADIUS)
