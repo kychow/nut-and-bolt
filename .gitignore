@@ -21,4 +21,5 @@ data_*/
 mono_crash.*.json
 
 .DS_Store
-
+# Local Claude Code MCP config (machine-specific absolute paths, not project content)
+.mcp.json
