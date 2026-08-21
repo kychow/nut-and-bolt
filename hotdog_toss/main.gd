@@ -222,6 +222,22 @@ var _release_velocity_multiplier: float = 3.0
 # (spring stiffness ~48) isn't fighting it in any noticeable way.
 var _funnel_center_pull_strength: float = 3.0
 
+# CSGShape3D (the head) has no physics_material_override slot (confirmed
+# earlier — setting it there is a hard error), so a hotdog hitting the
+# solid skull otherwise bounces with whatever Jolt's engine-default
+# restitution happens to be, which reads as "hitting a wall" rather than a
+# clear bounce. Scripted instead: on the FIRST contact tick with the head
+# (see _on_hotdog_segment_body_entered), reflect the segment's incoming
+# velocity across the local "away from head center" direction — a real
+# bounce, not just a shove — then scale it by this restitution. Since the
+# mouth is a genuine hole in the CSG collision (no contact fires there at
+# all), this only ever triggers on the solid parts of the skull, so a
+# trajectory aimed AT the mouth just sails through untouched, while one that
+# clips the rim gets redirected — sometimes off into space, sometimes
+# straight into the opening, exactly the "make it or bounce out" feel a
+# hoop-toss goal should have.
+var _head_bounce_restitution: float = 0.65
+
 # PD spring driving the hand toward the target. Damping is set to ~40% of
 # critical damping (2*sqrt(stiffness*mass)) for this stiffness/mass, which
 # is the "fluid but bouncy" regime (visible overshoot, a couple of settling
@@ -331,6 +347,12 @@ var _hotdog_chains: Array = []
 var _hotdog_chain_joints: Array = []
 var _hotdogs_remaining: int = 0
 
+# Each hotdog segment's linear_velocity as of the START of the current
+# physics tick, before that tick's collision response can alter it — see
+# _on_hotdog_segment_body_entered for why the signal's own reported
+# velocity is unusable for a scripted head-bounce.
+var _pre_collision_velocity: Dictionary = {}
+
 var _score: int = 0
 var _score_label: Label
 var _game_won: bool = false
@@ -361,6 +383,7 @@ func _ready() -> void:
 	_arm_left = _setup_arm(SHOULDER_POS, "left_arm_")
 	_arm_right = _setup_arm(RIGHT_SHOULDER_POS, "right_arm_")
 	_setup_table_and_pyramids()
+	_setup_table_walls()
 	_setup_camera()
 	_setup_controls_ui()
 	_setup_score_ui()
@@ -683,6 +706,7 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Throw velocity window", 1.0, 40.0, 1.0, _throw_velocity_samples, func(v): _throw_velocity_samples = v)
 	_add_slider(box, "Release velocity multiplier", 1.0, 8.0, 0.25, _release_velocity_multiplier, func(v): _release_velocity_multiplier = v)
 	_add_slider(box, "Funnel center pull", 0.0, 15.0, 0.5, _funnel_center_pull_strength, func(v): _funnel_center_pull_strength = v)
+	_add_slider(box, "Head bounce restitution", 0.0, 1.5, 0.05, _head_bounce_restitution, func(v): _head_bounce_restitution = v)
 	_add_slider(box, "Arm bounce", 0.0, 1.0, 0.05, _arm_material.bounce, func(v): _arm_material.bounce = v)
 	_add_slider(box, "Arm friction", 0.0, 1.0, 0.05, _arm_material.friction, func(v): _arm_material.friction = v)
 	_add_slider(box, "Hotdog bounce", 0.0, 1.0, 0.05, _hotdog_material.bounce, func(v): _hotdog_material.bounce = v)
@@ -802,6 +826,8 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.upper_arm.set_collision_mask_value(LAYER_FACE, true)
 	arm.upper_arm.set_collision_mask_value(LAYER_TABLE, true)
 	arm.upper_arm.set_collision_mask_value(LAYER_HOTDOG, true)
+	arm.upper_arm.contact_monitor = true
+	arm.upper_arm.max_contacts_reported = 4
 	add_child(arm.upper_arm)
 
 	arm.forearm = _make_capsule_body("Forearm", FOREARM_RADIUS, FOREARM_LEN + FOREARM_RADIUS * 2.0, 0.8, Color(0.85, 0.6, 0.45), _arm_material)
@@ -813,6 +839,8 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.forearm.set_collision_mask_value(LAYER_FACE, true)
 	arm.forearm.set_collision_mask_value(LAYER_TABLE, true)
 	arm.forearm.set_collision_mask_value(LAYER_HOTDOG, true)
+	arm.forearm.contact_monitor = true
+	arm.forearm.max_contacts_reported = 4
 	add_child(arm.forearm)
 
 	arm.hand = _make_capsule_body("Hand", HAND_RADIUS, HAND_LEN + HAND_RADIUS * 2.0, 0.4, Color(0.95, 0.75, 0.6), _arm_material)
@@ -824,6 +852,8 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.hand.set_collision_mask_value(LAYER_FACE, true)
 	arm.hand.set_collision_mask_value(LAYER_TABLE, true)
 	arm.hand.set_collision_mask_value(LAYER_HOTDOG, true)
+	arm.hand.contact_monitor = true
+	arm.hand.max_contacts_reported = 4
 	add_child(arm.hand)
 	arm.hand_mesh = arm.hand.get_node("Mesh")
 
@@ -935,6 +965,45 @@ func _setup_table_and_pyramids() -> void:
 	_setup_terrain_contours(RIGHT_PIT_POS)
 
 	_restock_pyramids()
+
+## Four plain (invisible) StaticBody3D panels ringing the table's edge —
+## nothing sits between the funnels and the table's own boundary (20x20,
+## see TABLE_SIZE), so a hard throw or a big bounce off the big slope can
+## otherwise send a hotdog sailing off the edge and falling forever, which
+## reads as "lost the hotdog" rather than a bounce. These use the same
+## tuned _environment_material as the rest of the terrain so they actually
+## bounce hotdogs back toward play instead of just deadstopping them.
+func _setup_table_walls() -> void:
+	var walls := StaticBody3D.new()
+	walls.name = "TableWalls"
+	walls.collision_layer = 0
+	walls.set_collision_layer_value(LAYER_TABLE, true)
+	walls.physics_material_override = _environment_material
+
+	var half_x := TABLE_SIZE.x * 0.5
+	var half_z := TABLE_SIZE.z * 0.5
+	var wall_thickness := 0.6
+	# Tall enough to catch anything thrown with real force (release velocity
+	# is tunable up to 8x peak hand speed) while staying well below the head,
+	# which sits well above the table — see HEAD_POS.
+	var wall_height := 6.0
+	var wall_center_y := TABLE_TOP_Y + wall_height * 0.5
+
+	var panels := [
+		[Vector3(0, wall_center_y, half_z + wall_thickness * 0.5), Vector3(TABLE_SIZE.x + wall_thickness * 2.0, wall_height, wall_thickness)],
+		[Vector3(0, wall_center_y, -half_z - wall_thickness * 0.5), Vector3(TABLE_SIZE.x + wall_thickness * 2.0, wall_height, wall_thickness)],
+		[Vector3(half_x + wall_thickness * 0.5, wall_center_y, 0), Vector3(wall_thickness, wall_height, TABLE_SIZE.z + wall_thickness * 2.0)],
+		[Vector3(-half_x - wall_thickness * 0.5, wall_center_y, 0), Vector3(wall_thickness, wall_height, TABLE_SIZE.z + wall_thickness * 2.0)],
+	]
+	for panel in panels:
+		var coll := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = panel[1]
+		coll.shape = box
+		coll.position = panel[0]
+		walls.add_child(coll)
+
+	add_child(walls)
 
 ## Builds one capsule-chain hotdog (see HOTDOG_SEGMENTS etc.) centered at the
 ## given world position, with each segment tagged with its chain index so
@@ -1232,13 +1301,32 @@ func _terrain_world_height_at(world_x: float, world_z: float) -> float:
 	var dist_right := Vector2(world_x - RIGHT_PIT_POS.x, world_z - RIGHT_PIT_POS.z).length()
 	return TABLE_TOP_Y + _terrain_height_at_radius(minf(dist_left, dist_right))
 
+## True while `body` is currently touching a table/funnel/slope/ground
+## surface (any body tagged LAYER_TABLE or LAYER_GROUND) — requires
+## contact_monitor + max_contacts_reported already set on `body` (true for
+## hotdog segments and, now, arm segments too). Used to keep the funnel pull
+## from grabbing hotdogs/arms mid-air (a held or just-thrown hotdog, or an
+## arm reaching through the funnel's airspace) — it should only nudge things
+## actually resting on a surface toward the pit center.
+func _is_touching_table_surface(body: RigidBody3D) -> bool:
+	for other in body.get_colliding_bodies():
+		if other is CollisionObject3D and (other.get_collision_layer_value(LAYER_TABLE) or other.get_collision_layer_value(LAYER_GROUND)):
+			return true
+	return false
+
 ## Nudges anything within a funnel's outer radius toward that pit's exact
 ## XZ center — see _funnel_center_pull_strength for why this exists on top
 ## of the slope/floor geometry. Horizontal only (no Y component), so it
 ## never fights gravity or lifts anything; within the funnel, "toward
 ## center" and "downhill" are the same direction anyway, since terrain
-## height there is purely a function of radius.
+## height there is purely a function of radius. Only applies to bodies
+## actually resting on the table/funnel surface (see
+## _is_touching_table_surface) — otherwise a thrown or held hotdog passing
+## over a funnel mid-air, or an arm merely reaching over one, would get
+## yanked sideways with no contact to justify it.
 func _apply_funnel_center_pull(body: RigidBody3D) -> void:
+	if not _is_touching_table_surface(body):
+		return
 	for pit_pos in [LEFT_PIT_POS, RIGHT_PIT_POS]:
 		var offset := Vector3(body.global_position.x - pit_pos.x, 0.0, body.global_position.z - pit_pos.z)
 		if offset.length() < DIP_OUTER_RADIUS:
@@ -1341,10 +1429,30 @@ func _release_held_hotdog(arm: ArmState) -> void:
 	arm.hand_mesh.material_override = _material(HAND_OPEN_COLOR)
 	_throw_sound.play()
 
-## Placeholder "bounce" cue — fires on any hotdog-segment collision above a
-## minimum speed, gated by a single GLOBAL cooldown (not per-segment) so a
-## whole pyramid settling at once can't turn into a machine-gun of beeps.
+## Fires on any hotdog-segment collision. Two independent things happen
+## here: a scripted bounce off the head's solid skull (see
+## _head_bounce_restitution for why this can't just be a physics material),
+## and the placeholder "bounce" sound cue, gated by a single GLOBAL cooldown
+## (not per-segment) so a whole pyramid settling at once can't turn into a
+## machine-gun of beeps.
 func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
+	if body == _head_visual:
+		var away := segment.global_position - HEAD_POS
+		if away.length() > 0.001:
+			var normal := away.normalized()
+			# NOT segment.linear_velocity — confirmed via diagnostic that by
+			# the time this signal fires, Jolt has already run this tick's
+			# collision response against the head's un-tunable default
+			# material and killed almost all of the incoming speed (an
+			# actual ~4 m/s impact showed up here as ~0.2-0.4 m/s), so
+			# reflecting that would produce a barely-visible nudge instead
+			# of a real bounce. _pre_collision_velocity holds each segment's
+			# velocity from the START of this same physics tick (set in
+			# _physics_process, which always runs before the physics step
+			# that triggers this signal), i.e. the true pre-impact velocity.
+			var v: Vector3 = _pre_collision_velocity.get(segment, segment.linear_velocity)
+			segment.linear_velocity = (v - 2.0 * v.dot(normal) * normal) * _head_bounce_restitution
+
 	if segment.linear_velocity.length() < BOUNCE_SOUND_MIN_SPEED:
 		return
 	var now := Time.get_ticks_msec()
@@ -1747,6 +1855,11 @@ func _physics_process(delta: float) -> void:
 	for chain in _hotdog_chains:
 		for seg in chain:
 			if is_instance_valid(seg):
+				# Snapshot BEFORE this tick's physics step resolves any new
+				# collision — see _on_hotdog_segment_body_entered/
+				# _pre_collision_velocity for why the signal itself can't be
+				# trusted for this.
+				_pre_collision_velocity[seg] = seg.linear_velocity
 				_apply_funnel_center_pull(seg)
 
 	_process_arm(_arm_left, delta)
