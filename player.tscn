@@ -1,6 +1,12 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://c08pbwj2lgc6u"]
 
-[ext_resource type="Script" path="res://player.gd" id="1"]
+[ext_resource type="PackedScene" uid="uid://dtwb6uxx4a8d4" path="res://assets/jamaican-sprinter-rigged.glb" id="1_4flbx"]
 
-[node name="Player" type="Node3D"]
-script = ExtResource("1")
+[node name="bolt" unique_id=1449194651 instance=ExtResource("1_4flbx")]
+
+[node name="Skeleton3D" parent="." index="0" unique_id=200050024]
+bones/6/rotation = Quaternion(4.898587e-17, 0, 0, 1)
+bones/7/rotation = Quaternion(-0.5646425, 0, 0, 0.8253356)
+bones/11/rotation = Quaternion(-0.5646425, 0, 0, 0.8253356)
+bones/14/rotation = Quaternion(-0.47942555, 0, 0, 0.87758255)
+bones/16/rotation = Quaternion(5.5109105e-17, 0, 0, 1)

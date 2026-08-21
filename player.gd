@@ -1,96 +1,158 @@
 class_name Player
 extends Node3D
 
-const HIP_HEIGHT := 0.9
-const LEG_LENGTH := 0.9
-const HIP_OFFSET := 0.22
-const SWING_ANGLE := 0.7
-const SMOOTHING := 8.0
+@export_group("Leg Controls")
+@export_range(0.0, 1.5, 0.05)
+var swing_angle := 0.65
 
-@export var move_speed := 1.5
+@export_range(1.0, 30.0, 0.5)
+var smoothing := 10.0
 
-var _left_pivot: Node3D
-var _right_pivot: Node3D
-var _stride: float = 0.0
+@export_group("Character")
+@export var character_scale := 1.0
+
+
+var character: Node3D
+var skeleton: Skeleton3D
+
+var left_thigh: int = -1
+var right_thigh: int = -1
+
+var left_neutral := Quaternion.IDENTITY
+var right_neutral := Quaternion.IDENTITY
 
 func _ready() -> void:
-	_setup_input_actions()
-	_build_torso()
-	_left_pivot = _build_leg("LeftLeg", Color(0.2, 0.5, 0.9), HIP_OFFSET)
-	_right_pivot = _build_leg("RightLeg", Color(0.9, 0.3, 0.3), -HIP_OFFSET)
+	_load_character()
+	_find_skeleton()
+	_setup_bones()
+
+
+func _load_character() -> void:
+	var glb_scene := load("res://assets/jamaican-sprinter-rigged.glb")
+
+	if glb_scene == null:
+		push_error(
+			"Player: Could not load res://assets/jamaican-sprinter-rigged.glb"
+		)
+		return
+
+	character = glb_scene.instantiate() as Node3D
+
+	if character == null:
+		push_error("Player: GLB root is not a Node3D.")
+		return
+
+	character.name = "Athlete"
+	character.scale = Vector3.ONE * character_scale
+
+	add_child(character)
+
+
+func _find_skeleton() -> void:
+	if character == null:
+		return
+
+	# Your GLB contains the Skeleton3D under the Athlete node.
+	skeleton = character.find_child(
+		"Skeleton3D",
+		true,
+		false
+	) as Skeleton3D
+
+	if skeleton == null:
+		# Fallback: find any Skeleton3D in the imported hierarchy.
+		skeleton = _find_skeleton_recursive(character)
+
+	if skeleton == null:
+		push_error(
+			"Player: Could not find Skeleton3D inside the GLB."
+		)
+		return
+
+	print("Player skeleton found: ", skeleton.get_path())
+
+
+func _find_skeleton_recursive(node: Node) -> Skeleton3D:
+	if node is Skeleton3D:
+		return node as Skeleton3D
+
+	for child in node.get_children():
+		var result := _find_skeleton_recursive(child)
+
+		if result != null:
+			return result
+
+	return null
+
+
+func _setup_bones() -> void:
+	if skeleton == null:
+		return
+
+	left_thigh = skeleton.find_bone("thigh_L")
+	right_thigh = skeleton.find_bone("thigh_R")
+
+	if left_thigh == -1:
+		push_error(
+			"Player: Could not find bone 'thigh_L'."
+		)
+
+	if right_thigh == -1:
+		push_error(
+			"Player: Could not find bone 'thigh_R'."
+		)
+
+	if left_thigh != -1:
+		left_neutral = skeleton.get_bone_pose_rotation(
+			left_thigh
+		)
+
+	if right_thigh != -1:
+		right_neutral = skeleton.get_bone_pose_rotation(
+			right_thigh
+		)
+
+	print("Left thigh bone index: ", left_thigh)
+	print("Right thigh bone index: ", right_thigh)
+
 
 func _physics_process(delta: float) -> void:
-	var left_pressed := Input.is_action_pressed("left_leg")
-	var right_pressed := Input.is_action_pressed("right_leg")
-	var both_pressed := left_pressed and right_pressed
-	var any_pressed := left_pressed or right_pressed
-	
-	# ---- Both keys held: legs freeze in place ----
-	if both_pressed:
-		# _stride stays exactly where it is; no lerp applied.
-		pass
-	else:
-		# Exactly one key pressed (or none): update stride toward target
-		if any_pressed and not both_pressed:
-			# Single‑key drive: +1 for left (A), −1 for right (D)
-			var drive := 1.0 if left_pressed else -1.0
-			var target := drive * SWING_ANGLE
-			_stride = lerpf(_stride, target, SMOOTHING * delta)
-		# If no keys are pressed, _stride retains its current angle
-		# ("hold the stride" — no automatic return to 0).
-	
-	# Apply mirrored rotation to both legs – same rate, opposite direction
-	_left_pivot.rotation.x = _stride
-	_right_pivot.rotation.x = -_stride
-	
-	# Forward motion only while legs are still swinging (not at max rotation)
-	if any_pressed and not both_pressed and abs(_stride) < SWING_ANGLE - 0.02:
-		position.z -= move_speed * delta
+	if skeleton == null:
+		return
 
-func _setup_input_actions() -> void:
-	if not InputMap.has_action("left_leg"):
-		InputMap.add_action("left_leg")
-		InputMap.action_add_event("left_leg", _key_event(KEY_A))
-	if not InputMap.has_action("right_leg"):
-		InputMap.add_action("right_leg")
-		InputMap.action_add_event("right_leg", _key_event(KEY_D))
+	if left_thigh == -1 or right_thigh == -1:
+		return
 
-func _key_event(key: Key) -> InputEventKey:
-	var event := InputEventKey.new()
-	event.keycode = key
-	event.physical_keycode = key
-	return event
+	var a_pressed := Input.is_key_pressed(KEY_A)
+	var d_pressed := Input.is_key_pressed(KEY_D)
 
-func _build_torso() -> void:
-	var torso := MeshInstance3D.new()
-	torso.name = "Torso"
-	var mesh := CapsuleMesh.new()
-	mesh.radius = 0.28
-	mesh.height = 0.8
-	torso.mesh = mesh
-	torso.position = Vector3(0, HIP_HEIGHT + LEG_LENGTH + 0.2, 0)
-	torso.material_override = _material(Color(0.9, 0.55, 0.2))
-	add_child(torso)
+	var left_target := left_neutral
+	var right_target := right_neutral
 
-func _build_leg(leg_name: String, color: Color, x_offset: float) -> Node3D:
-	var pivot := Node3D.new()
-	pivot.name = leg_name
-	pivot.position = Vector3(x_offset, HIP_HEIGHT, 0)
-	add_child(pivot)
+	if a_pressed:
+		left_target = left_neutral * Quaternion.from_euler(
+			Vector3(swing_angle, 0.0, 0.0)
+		)
+		
+		
+		
 
-	var leg := MeshInstance3D.new()
-	var mesh := CylinderMesh.new()
-	mesh.top_radius = 0.09
-	mesh.bottom_radius = 0.11
-	mesh.height = LEG_LENGTH
-	leg.mesh = mesh
-	leg.material_override = _material(color)
-	leg.position = Vector3(0, -LEG_LENGTH / 2.0, 0)
-	pivot.add_child(leg)
+	if d_pressed:
+		right_target = right_neutral * Quaternion.from_euler(
+			Vector3(swing_angle, 0.0, 0.0)
+		)
 
-	return pivot
+	var weight := 1.0 - exp(-smoothing * delta)
 
-func _material(color: Color) -> StandardMaterial3D:
-	var material := StandardMaterial3D.new()
-	material.albedo_color = color
-	return material
+	var left_current := skeleton.get_bone_pose_rotation(left_thigh)
+	var right_current := skeleton.get_bone_pose_rotation(right_thigh)
+
+	skeleton.set_bone_pose_rotation(
+		left_thigh,
+		left_current.slerp(left_target, weight)
+	)
+
+	skeleton.set_bone_pose_rotation(
+		right_thigh,
+		right_current.slerp(right_target, weight)
+	)
