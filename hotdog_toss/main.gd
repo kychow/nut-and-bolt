@@ -829,6 +829,22 @@ func _material(color: Color) -> StandardMaterial3D:
 	material.albedo_color = color
 	return material
 
+## Frosted-glass-style translucent material for the table/funnel surfaces —
+## per feedback, rather than shrinking the funnel slope's own reach (real
+## risk of undoing already-tuned "does a toss roll back" behavior), the
+## table itself becomes see-through so a skin's giant body (deliberately
+## sized to match its head, see _setup_body_skin) stays visible extending
+## down through it instead of being hidden behind opaque terrain. High
+## roughness (rather than a smooth/clear glass look) is what reads as
+## "frosted" — a diffuse, foggy translucency instead of a sharp see-through.
+func _frosted_material(color: Color, alpha: float = 0.35) -> StandardMaterial3D:
+	var material := StandardMaterial3D.new()
+	material.albedo_color = Color(color.r, color.g, color.b, alpha)
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.roughness = 1.0
+	material.metallic = 0.0
+	return material
+
 func _physics_material(bounce: float, friction: float) -> PhysicsMaterial:
 	var mat := PhysicsMaterial.new()
 	mat.bounce = bounce
@@ -979,7 +995,7 @@ func _setup_table_and_pyramids() -> void:
 	table.use_collision = true
 	table.collision_layer = 0
 	table.set_collision_layer_value(LAYER_TABLE, true)
-	table.material = _material(Color(0.5, 0.35, 0.22))
+	table.material = _frosted_material(Color(0.5, 0.35, 0.22))
 	# CSGShape3D has no physics_material_override (confirmed earlier on the
 	# head — setting it there is a hard error), so this flat portion uses
 	# engine-default bounce/friction; the funnel walls and pit floors below
@@ -1169,7 +1185,7 @@ func _make_funnel_pit(pit_pos: Vector3) -> void:
 
 	var mesh_inst := MeshInstance3D.new()
 	mesh_inst.mesh = st.commit()
-	mesh_inst.material_override = _material(Color(0.42, 0.29, 0.18))
+	mesh_inst.material_override = _frosted_material(Color(0.42, 0.29, 0.18))
 	funnel_body.add_child(mesh_inst)
 
 	# Collision is built from simple tilted BoxShape3D panels, NOT a
@@ -1214,7 +1230,7 @@ func _make_funnel_pit(pit_pos: Vector3) -> void:
 	floor_cyl.bottom_radius = PIT_RADIUS
 	floor_cyl.height = 0.06
 	floor_mesh_inst.mesh = floor_cyl
-	floor_mesh_inst.material_override = _material(Color(0.32, 0.22, 0.14))
+	floor_mesh_inst.material_override = _frosted_material(Color(0.32, 0.22, 0.14))
 	pit_floor.add_child(floor_mesh_inst)
 
 	var floor_coll := CollisionShape3D.new()
@@ -1311,7 +1327,7 @@ func _make_big_slope(pit_pos: Vector3) -> void:
 	st.generate_normals()
 	var mesh_inst := MeshInstance3D.new()
 	mesh_inst.mesh = st.commit()
-	mesh_inst.material_override = _material(Color(0.48, 0.33, 0.2))
+	mesh_inst.material_override = _frosted_material(Color(0.48, 0.33, 0.2))
 	slope_body.add_child(mesh_inst)
 	container.add_child(slope_body)
 
