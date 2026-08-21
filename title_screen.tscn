@@ -1,0 +1,86 @@
+[gd_scene format=3 uid="uid://c7r2oaxq4vmht"]
+
+[ext_resource type="Script" path="res://title_screen.gd" id="1_title"]
+[ext_resource type="Script" path="res://backdrop.gd" id="2_backdrop"]
+
+[sub_resource type="Animation" id="Animation_flash"]
+resource_name = "flash"
+length = 1.6
+loop_mode = 1
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("PressAnyKey:modulate:a")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0.0, 0.8, 1.6),
+"transitions": PackedFloat32Array(2.0, 2.0, 1.0),
+"update": 0,
+"values": [0.3, 1.0, 0.3]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_flash"]
+_data = {
+&"flash": SubResource("Animation_flash")
+}
+
+[node name="TitleScreen" type="CanvasLayer"]
+script = ExtResource("1_title")
+
+[node name="Root" type="Control" parent="."]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Backdrop" type="Control" parent="Root"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("2_backdrop")
+
+[node name="Title" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.1
+anchor_top = 0.1
+anchor_right = 0.9
+anchor_bottom = 0.1
+offset_bottom = 150.0
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.12, 0.12, 0.18, 1)
+theme_override_constants/outline_size = 12
+theme_override_font_sizes/font_size = 96
+horizontal_alignment = 1
+vertical_alignment = 0
+text = "Nut and Bolt"
+
+[node name="PressAnyKey" type="Label" parent="Root"]
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.1
+anchor_top = 0.74
+anchor_right = 0.9
+anchor_bottom = 0.84
+grow_horizontal = 2
+theme_override_colors/font_color = Color(1, 1, 1, 1)
+theme_override_colors/font_outline_color = Color(0.12, 0.12, 0.18, 1)
+theme_override_constants/outline_size = 6
+theme_override_font_sizes/font_size = 30
+horizontal_alignment = 1
+text = "Press any key to begin"
+
+[node name="Flash" type="AnimationPlayer" parent="Root"]
+libraries = {
+&"": SubResource("AnimationLibrary_flash")
+}
+autoplay = "flash"

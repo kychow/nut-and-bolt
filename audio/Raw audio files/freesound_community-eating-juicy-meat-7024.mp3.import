@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://x0ax1w3r6adc"
+path="res://.godot/imported/freesound_community-eating-juicy-meat-7024.mp3-6499aff8b2b3395bdaeee5cc620fd6fb.mp3str"
+
+[deps]
+
+source_file="res://audio/Raw audio files/freesound_community-eating-juicy-meat-7024.mp3"
+dest_files=["res://.godot/imported/freesound_community-eating-juicy-meat-7024.mp3-6499aff8b2b3395bdaeee5cc620fd6fb.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
