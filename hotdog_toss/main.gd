@@ -62,8 +62,6 @@ const HAND_RADIUS := 0.05
 const HAND_LEN := 0.05
 const MAX_REACH := UPPER_ARM_LEN + FOREARM_LEN
 
-const ELBOW_MIN_DEG := 0.0
-const ELBOW_MAX_DEG := 140.0
 const WRIST_LIMIT_DEG := 30.0
 
 const GRAB_RADIUS := 0.08
@@ -226,14 +224,6 @@ var _shoulder_spring_damping: float = 3.0
 # uninitialized (Vector3.ZERO is a sentinel meaning "snap to the current
 # direction on the first tick").
 var _shoulder_aim_lag: float = 0.5
-
-# Elbow uses HingeJoint3D's own native motor instead — a true 1-DOF hinge is
-# exactly what that motor is a well-defined, non-ambiguous fit for. Driven
-# toward a 2-link-IK elbow angle each tick, but torque-limited (max_impulse)
-# so it's an assist, not a kinematic override — gravity/momentum/collisions
-# can still overpower it, so the arm stays genuinely physics-driven.
-var _elbow_motor_strength: float = 4.0
-var _elbow_motor_gain: float = 1.5
 
 # Arm segments get a bit of extra gravity_scale on top of the engine default
 # so a released/undriven arm visibly sags — but not so much that the spring
@@ -657,8 +647,6 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Shoulder spring stiffness", 0.0, 60.0, 1.0, _shoulder_spring_stiffness, func(v): _shoulder_spring_stiffness = v)
 	_add_slider(box, "Shoulder spring damping", 0.0, 15.0, 0.25, _shoulder_spring_damping, func(v): _shoulder_spring_damping = v)
 	_add_slider(box, "Shoulder aim lag", 0.1, 10.0, 0.1, _shoulder_aim_lag, func(v): _shoulder_aim_lag = v)
-	_add_slider(box, "Elbow motor strength", 0.0, 40.0, 0.5, _elbow_motor_strength, func(v): _elbow_motor_strength = v)
-	_add_slider(box, "Elbow motor gain", 0.0, 15.0, 0.25, _elbow_motor_gain, func(v): _elbow_motor_gain = v)
 	_add_slider(box, "Arm gravity scale", 0.0, 3.0, 0.1, _arm_gravity_scale, func(v):
 		_arm_gravity_scale = v
 		for arm in [_arm_left, _arm_right]:
@@ -843,21 +831,17 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	_configure_6dof(shoulder_joint, -1.0)
 
 	# Elbow: HingeJoint3D, hinge axis = world X (the joint's local Z axis).
+	# Deliberately no angle limit and no motor — a free hinge the upper arm
+	# and forearm swing through on their own momentum/gravity/collisions,
+	# same as the shoulder's own unrestricted joint. Only the hinge's
+	# position (elbow_pos, the pivot between the two segments) is fixed;
+	# nothing constrains or drives the angle around it.
 	arm.elbow_joint = HingeJoint3D.new()
 	add_child(arm.elbow_joint)
 	arm.elbow_joint.global_transform = Transform3D(_basis_from_axis(Vector3.RIGHT), elbow_pos)
 	arm.elbow_joint.node_a = arm.elbow_joint.get_path_to(arm.upper_arm)
 	arm.elbow_joint.node_b = arm.elbow_joint.get_path_to(arm.forearm)
 	arm.elbow_joint.exclude_nodes_from_collision = true
-	arm.elbow_joint.set_flag(HingeJoint3D.FLAG_USE_LIMIT, true)
-	arm.elbow_joint.set_param(HingeJoint3D.PARAM_LIMIT_LOWER, deg_to_rad(ELBOW_MIN_DEG))
-	arm.elbow_joint.set_param(HingeJoint3D.PARAM_LIMIT_UPPER, deg_to_rad(ELBOW_MAX_DEG))
-	# Native motor (a true 1-DOF hinge is an unambiguous fit for this, unlike
-	# the 6DOF spring fields) — target_velocity is driven each physics tick
-	# in _physics_process from a 2-link-IK elbow angle; max_impulse here caps
-	# how strongly it can push, so it's an assist, not a kinematic override.
-	arm.elbow_joint.set_flag(HingeJoint3D.FLAG_ENABLE_MOTOR, true)
-	arm.elbow_joint.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, _elbow_motor_strength)
 
 	# Wrist: Generic6DOFJoint3D, linear locked + modest angular limits.
 	var wrist_joint := Generic6DOFJoint3D.new()
@@ -877,7 +861,7 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 		"target": arm.target_pos,
 	}
 
-	_setup_debug_visuals(arm, elbow_pos, wrist_pos, rest_basis)
+	_setup_debug_visuals(arm, wrist_pos, rest_basis)
 	return arm
 
 func _setup_table_and_pyramids() -> void:
@@ -1750,7 +1734,6 @@ func _process_arm(arm: ArmState, delta: float) -> void:
 	arm.hand.apply_central_force(force)
 
 	_drive_shoulder_spring(arm, delta)
-	_drive_elbow_motor(arm)
 	_update_arm_skin_pose(arm)
 	_record_hand_velocity(arm)
 
@@ -1787,36 +1770,6 @@ func _drive_shoulder_spring(arm: ArmState, delta: float) -> void:
 		arm.shoulder_aim_dir = raw_dir
 	arm.shoulder_aim_dir = arm.shoulder_aim_dir.slerp(raw_dir, clampf(_shoulder_aim_lag * delta, 0.0, 1.0))
 	arm.upper_arm.apply_torque(_align_torque(arm.upper_arm, arm.shoulder_aim_dir, _shoulder_spring_stiffness, _shoulder_spring_damping))
-
-func _drive_elbow_motor(arm: ArmState) -> void:
-	# Desired elbow bend via 2-link law-of-cosines IK toward the current
-	# target distance — used only as a torque-limited motor target (see
-	# _elbow_motor_strength), so this assists rather than replaces physics.
-	#
-	# The thruster-style target control tends to push the target out to
-	# (and pin it at) max reach almost any time a direction key is held —
-	# and at max reach the IK math for "dist" always demands a fully
-	# straight arm (desired_flex -> 0). Without a floor here, that meant the
-	# motor was constantly commanding "stay straight" regardless of player
-	# intent, fighting and suppressing the natural momentum-driven bending
-	# the physics sim otherwise produces on its own (confirmed via
-	# diagnostic — current_flex reached 54° from pure momentum before the
-	# motor yanked it back). MIN_ELBOW_FLEX keeps a baseline "comfortably
-	# bent" target at all times instead of ever asking for ramrod-straight.
-	var dist := clampf((arm.target_pos - arm.shoulder_pos).length(), 0.001, UPPER_ARM_LEN + FOREARM_LEN - 0.001)
-	var cos_interior := clampf((UPPER_ARM_LEN * UPPER_ARM_LEN + FOREARM_LEN * FOREARM_LEN - dist * dist) / (2.0 * UPPER_ARM_LEN * FOREARM_LEN), -1.0, 1.0)
-	var interior_angle := acos(cos_interior)
-	const MIN_ELBOW_FLEX := deg_to_rad(25.0)
-	var desired_flex := maxf(PI - interior_angle, MIN_ELBOW_FLEX)
-
-	var hinge_axis := Vector3.RIGHT
-	var upper_ref := (arm.upper_arm.global_transform.basis.y - hinge_axis * arm.upper_arm.global_transform.basis.y.dot(hinge_axis)).normalized()
-	var forearm_ref := (arm.forearm.global_transform.basis.y - hinge_axis * arm.forearm.global_transform.basis.y.dot(hinge_axis)).normalized()
-	var current_flex := upper_ref.signed_angle_to(forearm_ref, hinge_axis)
-
-	var target_velocity := clampf((desired_flex - current_flex) * _elbow_motor_gain, -8.0, 8.0)
-	arm.elbow_joint.set_param(HingeJoint3D.PARAM_MOTOR_TARGET_VELOCITY, target_velocity)
-	arm.elbow_joint.set_param(HingeJoint3D.PARAM_MOTOR_MAX_IMPULSE, _elbow_motor_strength)
 
 func _reset_arm(arm: ArmState) -> void:
 	arm.upper_arm.global_transform = arm.rest_transforms["upper_arm"]
@@ -1911,21 +1864,14 @@ func _make_wire_cone(half_angle_deg: float, length: float) -> MeshInstance3D:
 			st.add_vertex(p)
 	)
 
-func _setup_debug_visuals(arm: ArmState, elbow_pos: Vector3, wrist_pos: Vector3, rest_basis: Basis) -> void:
+func _setup_debug_visuals(arm: ArmState, wrist_pos: Vector3, rest_basis: Basis) -> void:
 	var reach_sphere := _make_wire_sphere(MAX_REACH)
 	reach_sphere.position = arm.shoulder_pos
 	add_child(reach_sphere)
 	_debug_nodes.append(reach_sphere)
 
-	# Elbow limit arc, parented to the upper arm so it moves with it. Computed
-	# once relative to the upper arm's own frame — valid for the joint's
-	# lifetime since the hinge axis is fixed relative to that body.
-	var elbow_arc := _make_wire_arc(0.15, ELBOW_MIN_DEG, ELBOW_MAX_DEG)
-	var elbow_local_basis: Basis = arm.upper_arm.global_transform.basis.inverse() * _basis_from_axis(Vector3.RIGHT)
-	var elbow_local_pos: Vector3 = arm.upper_arm.global_transform.basis.inverse() * (elbow_pos - arm.upper_arm.global_position)
-	elbow_arc.transform = Transform3D(elbow_local_basis, elbow_local_pos)
-	arm.upper_arm.add_child(elbow_arc)
-	_debug_nodes.append(elbow_arc)
+	# No elbow limit arc here anymore — the elbow is a free hinge with no
+	# angle limit (see _setup_arm), so there's no bound left to illustrate.
 
 	# Wrist limit cone, parented to the forearm the same way.
 	var wrist_cone := _make_wire_cone(WRIST_LIMIT_DEG, 0.15)
