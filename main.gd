@@ -164,7 +164,7 @@ func _create_track() -> void:
 
 	track.position = Vector3(
 		0.0,
-		0.05,
+		0.0,
 		-track_length / 2.0
 	)
 
@@ -330,7 +330,7 @@ func _setup_camera() -> void:
 	_player.add_child(camera)
 
 	camera.position = Vector3(
-		0.0,
+		5.0,
 		camera_height,
 		camera_distance
 	)
@@ -350,4 +350,4 @@ func _setup_camera() -> void:
 
 	camera.current = true
 
-	camera.fov = 55.0
+	camera.fov = 20.0
