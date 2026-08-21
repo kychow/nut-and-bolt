@@ -243,6 +243,24 @@ var _release_velocity_multiplier: float = 3.0
 # (spring stiffness ~48) isn't fighting it in any noticeable way.
 var _funnel_center_pull_strength: float = 3.0
 
+# The sloped terrain (_terrain_height_at_radius) only actually slopes out to
+# LARGE_SLOPE_RADIUS from a pit — past that it's a flat plateau with zero
+# gradient, so a hard/lucky throw that overshoots the slope entirely lands
+# somewhere with nothing at all pulling it back (confirmed: it just sits
+# exactly where it landed, often out of camera frame — reads as "the hotdog
+# disappeared"). This is a FIXED-magnitude nudge toward whichever pit is
+# nearer, not a spring like _funnel_center_pull_strength above — a
+# proportional force would be enormous at, say, 8 units out for a hotdog
+# segment's tiny mass. It only fires beyond LARGE_SLOPE_RADIUS (see
+# _apply_funnel_center_pull); once that nudges something back inside the
+# slope, the real sloped geometry and the close-range spring pull both take
+# over on their own. Needs to comfortably clear static friction to ever
+# start a resting hotdog moving at all (confirmed via diagnostic: 0.15
+# left it dead stopped indefinitely — friction against a hotdog segment's
+# tiny mass, ~0.05, absorbed it completely) rather than a true "gentle"
+# feel being achievable here.
+var _long_range_return_strength: float = 0.6
+
 # CSGShape3D (the head) has no physics_material_override slot (confirmed
 # earlier — setting it there is a hard error), so a hotdog hitting the
 # solid skull otherwise bounces with whatever Jolt's engine-default
@@ -727,6 +745,7 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Throw velocity window", 1.0, 40.0, 1.0, _throw_velocity_samples, func(v): _throw_velocity_samples = v)
 	_add_slider(box, "Release velocity multiplier", 1.0, 8.0, 0.25, _release_velocity_multiplier, func(v): _release_velocity_multiplier = v)
 	_add_slider(box, "Funnel center pull", 0.0, 15.0, 0.5, _funnel_center_pull_strength, func(v): _funnel_center_pull_strength = v)
+	_add_slider(box, "Long-range return pull", 0.0, 3.0, 0.05, _long_range_return_strength, func(v): _long_range_return_strength = v)
 	_add_slider(box, "Head bounce restitution", 0.0, 1.5, 0.05, _head_bounce_restitution, func(v): _head_bounce_restitution = v)
 	_add_slider(box, "Arm bounce", 0.0, 1.0, 0.05, _arm_material.bounce, func(v): _arm_material.bounce = v)
 	_add_slider(box, "Arm friction", 0.0, 1.0, 0.05, _arm_material.friction, func(v): _arm_material.friction = v)
@@ -1331,7 +1350,15 @@ func _terrain_world_height_at(world_x: float, world_z: float) -> float:
 ## actually resting on a surface toward the pit center.
 func _is_touching_table_surface(body: RigidBody3D) -> bool:
 	for other in body.get_colliding_bodies():
-		if other is CollisionObject3D and (other.get_collision_layer_value(LAYER_TABLE) or other.get_collision_layer_value(LAYER_GROUND)):
+		# NOT "other is CollisionObject3D" — confirmed via diagnostic that
+		# the flat table (a CSGBox3D) reports itself in get_colliding_bodies()
+		# same as any StaticBody3D would, but CSGShape3D doesn't actually
+		# extend CollisionObject3D, so that check silently excluded it and
+		# left anything resting on the flat table reading as "not touching"
+		# forever. CSGShape3D still exposes get_collision_layer_value
+		# natively (it's how the table's own layer got set up in the first
+		# place), so duck-typing on the method is enough.
+		if other.has_method("get_collision_layer_value") and (other.get_collision_layer_value(LAYER_TABLE) or other.get_collision_layer_value(LAYER_GROUND)):
 			return true
 	return false
 
@@ -1345,14 +1372,75 @@ func _is_touching_table_surface(body: RigidBody3D) -> bool:
 ## _is_touching_table_surface) — otherwise a thrown or held hotdog passing
 ## over a funnel mid-air, or an arm merely reaching over one, would get
 ## yanked sideways with no contact to justify it.
+##
+## Also handles the opposite extreme: anything that landed beyond
+## LARGE_SLOPE_RADIUS, past where the terrain has any slope at all, gets a
+## fixed (non-spring) nudge toward whichever pit is nearer — see
+## _long_range_return_strength.
 func _apply_funnel_center_pull(body: RigidBody3D) -> void:
 	if not _is_touching_table_surface(body):
 		return
-	for pit_pos in [LEFT_PIT_POS, RIGHT_PIT_POS]:
-		var offset := Vector3(body.global_position.x - pit_pos.x, 0.0, body.global_position.z - pit_pos.z)
-		if offset.length() < DIP_OUTER_RADIUS:
-			body.apply_central_force(-offset * _funnel_center_pull_strength)
-			return
+	var nearest_pit := LEFT_PIT_POS
+	if body.global_position.distance_squared_to(RIGHT_PIT_POS) < body.global_position.distance_squared_to(LEFT_PIT_POS):
+		nearest_pit = RIGHT_PIT_POS
+	var offset := Vector3(body.global_position.x - nearest_pit.x, 0.0, body.global_position.z - nearest_pit.z)
+	var dist := offset.length()
+	if dist < DIP_OUTER_RADIUS:
+		body.apply_central_force(-offset * _funnel_center_pull_strength)
+	elif dist > LARGE_SLOPE_RADIUS:
+		body.apply_central_force(-offset.normalized() * _long_range_return_strength)
+
+# Anything genuinely on the table never gets anywhere near this low —
+# confirmed via diagnostic that the two funnel slopes' seam (where each
+# pit's cone gets angularly trimmed so the two don't overlap — see
+# _slope_outer_radius) has a real gap somewhere along it: an object pulled
+# straight down that line (roughly equidistant from both pits, e.g. by
+# _long_range_return_strength above) can tunnel through into permanent
+# freefall instead of landing on either slope. Rather than re-deriving that
+# seam mesh (real risk of trading one edge case for another), anything that
+# falls this far below the table gets teleported back — a standard
+# "fell through the floor" safety net, and strictly better than a hotdog
+# just vanishing into the void forever.
+const FALLEN_KILL_Y := -5.0
+
+## True if `body` is resting on the under-table "Ground" plinth (LAYER_GROUND,
+## see _setup_ground) — a second, much more common tunneling case found via
+## diagnostic: a hotdog pulled through the SMALL funnel's own collision (a
+## separate set of tilted panels from the big slope's, see _make_funnel_pit)
+## can slip through it too, but rather than free-falling forever it lands on
+## this plinth sitting below the whole table and just stops there — stable,
+## so it would never trip the FALLEN_KILL_Y check above, but just as
+## unreachable/invisible as actually falling through. Legitimate hotdog rest
+## surfaces are all LAYER_TABLE; LAYER_GROUND is never one of them, so
+## touching it at all is itself the signal to rescue, regardless of height.
+func _is_touching_ground_plinth(body: RigidBody3D) -> bool:
+	for other in body.get_colliding_bodies():
+		if other.has_method("get_collision_layer_value") and other.get_collision_layer_value(LAYER_GROUND):
+			return true
+	return false
+
+## Teleports a WHOLE hotdog chain back above whichever pit it was nearest to
+## when it fell through — moved by one shared rigid delta (same trick
+## _grab_hotdog uses) so the chain's own permanent inter-segment joints
+## don't get stressed by only one segment jumping.
+func _rescue_hotdog_chain_if_fallen(chain: Array) -> void:
+	if chain.is_empty():
+		return
+	var lead: RigidBody3D = chain[0]
+	if not is_instance_valid(lead):
+		return
+	if lead.global_position.y >= FALLEN_KILL_Y and not _is_touching_ground_plinth(lead):
+		return
+	var nearest_pit := LEFT_PIT_POS
+	if lead.global_position.distance_squared_to(RIGHT_PIT_POS) < lead.global_position.distance_squared_to(LEFT_PIT_POS):
+		nearest_pit = RIGHT_PIT_POS
+	var safe_pos := nearest_pit + Vector3(0, 1.0, 0)
+	var delta := Transform3D(Basis.IDENTITY, safe_pos - lead.global_position)
+	for seg in chain:
+		if is_instance_valid(seg):
+			seg.global_transform = delta * seg.global_transform
+			seg.linear_velocity = Vector3.ZERO
+			seg.angular_velocity = Vector3.ZERO
 
 ## Topographic contour rings (like a map's elevation lines) at fixed radius
 ## steps around a pit, each drawn flat at its own actual terrain height —
@@ -1882,6 +1970,7 @@ func _physics_process(delta: float) -> void:
 				# trusted for this.
 				_pre_collision_velocity[seg] = seg.linear_velocity
 				_apply_funnel_center_pull(seg)
+		_rescue_hotdog_chain_if_fallen(chain)
 
 	_process_arm(_arm_left, delta)
 	_process_arm(_arm_right, delta)
