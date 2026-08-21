@@ -107,7 +107,14 @@ const LARGE_SLOPE_DEPTH := 2.2
 # that turned out to sit too low (the skin head's own proportions extend
 # further below center than the primitive sphere, overlapping the
 # terrain) — net gap above the tabletop is now 2 * HEAD_RADIUS.
-const HEAD_POS := Vector3(0, TABLE_TOP_Y + HEAD_RADIUS + HEAD_RADIUS, 0)
+#
+# Z is pushed back so the head's own FRONT surface (its +Z-facing edge,
+# HEAD_RADIUS in front of center) lands exactly at the back edge of the
+# small funnel (DIP_OUTER_RADIUS out from the pit center, on the -Z side) —
+# the funnel itself, not the much bigger outer slope, since that's the
+# part actually within arm's reach. Keeps the head from visually
+# overlapping the depth range the arms actually work in.
+const HEAD_POS := Vector3(0, TABLE_TOP_Y + HEAD_RADIUS + HEAD_RADIUS, LEFT_PIT_POS.z - DIP_OUTER_RADIUS - HEAD_RADIUS)
 
 const HOTDOG_RADIUS := 0.045
 const HOTDOG_LEN := 0.22
@@ -196,6 +203,13 @@ var _target_accel: float = 650.0
 # throw be "pre-charged" and released long after — tunable rather than a
 # fixed guess, since the right amount of forgiveness here is a feel call.
 var _throw_velocity_samples: float = 16.0
+
+# Multiplies the peak velocity a throw uses at release — a hotdog released
+# "at 1 m/s" actually flies at 3x that, same direction. Makes throws feel
+# more forceful than the arm's own (deliberately floaty/weak) motion would
+# otherwise produce; tunable since the right amount of extra oomph is a
+# feel call, not a physical fact.
+var _release_velocity_multiplier: float = 3.0
 
 # PD spring driving the hand toward the target. Damping is set to ~40% of
 # critical damping (2*sqrt(stiffness*mass)) for this stiffness/mass, which
@@ -656,6 +670,7 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Target gravity", 0.0, 20.0, 0.5, _target_gravity, func(v): _target_gravity = v)
 	_add_slider(box, "Target accel", 100.0, 1200.0, 10.0, _target_accel, func(v): _target_accel = v)
 	_add_slider(box, "Throw velocity window", 1.0, 40.0, 1.0, _throw_velocity_samples, func(v): _throw_velocity_samples = v)
+	_add_slider(box, "Release velocity multiplier", 1.0, 8.0, 0.25, _release_velocity_multiplier, func(v): _release_velocity_multiplier = v)
 	_add_slider(box, "Arm bounce", 0.0, 1.0, 0.05, _arm_material.bounce, func(v): _arm_material.bounce = v)
 	_add_slider(box, "Arm friction", 0.0, 1.0, 0.05, _arm_material.friction, func(v): _arm_material.friction = v)
 	_add_slider(box, "Hotdog bounce", 0.0, 1.0, 0.05, _hotdog_material.bounce, func(v): _hotdog_material.bounce = v)
@@ -1270,9 +1285,21 @@ func _release_held_hotdog(arm: ArmState) -> void:
 	# most of its speed to target gravity/damping in well under half a
 	# second, before the player can physically press release. Without
 	# this, a swing that clearly built up real speed a moment earlier
-	# still throws with almost none.
-	arm.held_segment.linear_velocity = _peak_hand_velocity(arm)
-	arm.held_segment.angular_velocity = arm.hand.angular_velocity
+	# still throws with almost none. Then scaled up by
+	# _release_velocity_multiplier (same direction, just faster) since the
+	# arm's own motion alone reads as too weak to throw with.
+	var release_velocity := _peak_hand_velocity(arm) * _release_velocity_multiplier
+	# Applied to EVERY segment of the chain, not just the held one —
+	# confirmed via diagnostic that setting only the held segment's
+	# velocity doesn't survive the next physics step: the hotdog's own
+	# inter-segment joints (zero linear play, permanent, separate from the
+	# grab joint) immediately average that one segment's boosted velocity
+	# against its still-slow neighbors, and the whole chain ends up well
+	# below the intended speed within a single tick.
+	for seg in _hotdog_chains[arm.held_hotdog_id]:
+		if is_instance_valid(seg):
+			seg.linear_velocity = release_velocity
+			seg.angular_velocity = arm.hand.angular_velocity
 	arm.grab_joint.queue_free()
 	arm.grab_joint = null
 	arm.held_segment = null
