@@ -9,6 +9,10 @@ extends Node3D
 @export var track_length := 320.0
 @export var track_width := 12.0
 
+@export_group("Audio")
+@export var bgm_volume_db := -8.0
+@export_file("*.mp3", "*.ogg", "*.wav") var bgm_stream_path := "res://audio/Raw audio files/Super_Mario_Level_Loop_FULL_SONG_MusicGPT.mp3"
+
 
 var _player: Player
 
@@ -19,6 +23,8 @@ var _elapsed_time := 0.0
 var _hud_canvas_layer = null
 var _timer_label = null
 
+var _bgm_player: AudioStreamPlayer
+
 
 func _ready() -> void:
 	_setup_environment()
@@ -28,6 +34,7 @@ func _ready() -> void:
 	_setup_camera()
 
 	_create_hud()
+	_setup_bgm()
 
 
 # ============================================================
@@ -330,6 +337,34 @@ func _grid_texture() -> Texture2D:
 
 	return ImageTexture.create_from_image(image)
 
+
+func _setup_bgm() -> void:
+	_bgm_player = AudioStreamPlayer.new()
+	_bgm_player.name = "BGMPlayer"
+	_bgm_player.bus = "Master"
+	_bgm_player.volume_db = bgm_volume_db
+	_bgm_player.autoplay = false
+	add_child(_bgm_player)
+
+	if bgm_stream_path.is_empty():
+		push_warning("Main: BGM stream path is empty.")
+		return
+
+	var stream := load(bgm_stream_path) as AudioStream
+	if stream == null:
+		push_warning("Main: Could not load BGM stream: %s" % bgm_stream_path)
+		return
+
+	# Enable looping for MP3/OGG/WAV at runtime (import may have loop=false)
+	if stream is AudioStreamMP3:
+		(stream as AudioStreamMP3).loop = true
+	elif stream is AudioStreamOggVorbis:
+		(stream as AudioStreamOggVorbis).loop = true
+	elif stream is AudioStreamWAV:
+		(stream as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
+
+	_bgm_player.stream = stream
+	_bgm_player.play()
 
 # ============================================================
 # PLAYER
