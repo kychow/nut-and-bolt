@@ -180,6 +180,27 @@ const SKIN_DEFS := [
 		# measured size onto this game's head diameter (2 * HEAD_RADIUS).
 		"head_scale": (2.0 * HEAD_RADIUS) / 0.22,
 	},
+	{
+		"name": "Joey Chestnut",
+		"glb_path": "res://skins/joey-chestnut-nathans-rigged.glb",
+		# This rig's own convention is "L"/"R" with no underscore
+		# (upperarmL, not upperarm_L) — confirmed via the same headless
+		# bone-inspection approach used for the sprinter rig. Same
+		# screen-left/anatomical-right mirroring as that rig too.
+		"left_arm_bones": {"upper": "upperarmR", "fore": "lowerarmR", "hand": "handR"},
+		"right_arm_bones": {"upper": "upperarmL", "fore": "lowerarmL", "hand": "handL"},
+		"head_bone": "head",
+		"hide_root_bone": "hips",
+		# Measured rest bone lengths (upperarmL: 0.30, lowerarmL: 0.26) via
+		# the same headless bone-inspection approach as the sprinter rig
+		# above.
+		"scale": MAX_REACH / (0.30 + 0.26),
+		# Measured local AABB of vertices weighted to the "head" bone:
+		# (0.281, 0.302, 0.300) — close enough to a cube that, same as the
+		# sprinter rig, one averaged dimension stands in for a single
+		# "head diameter".
+		"head_scale": (2.0 * HEAD_RADIUS) / 0.294,
+	},
 ]
 
 # Thruster-style target control — deliberately floaty by design; see the
