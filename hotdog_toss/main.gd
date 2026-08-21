@@ -1387,7 +1387,15 @@ func _apply_funnel_center_pull(body: RigidBody3D) -> void:
 	var dist := offset.length()
 	if dist < DIP_OUTER_RADIUS:
 		body.apply_central_force(-offset * _funnel_center_pull_strength)
-	elif dist > LARGE_SLOPE_RADIUS:
+	else:
+		# Used to only fire past LARGE_SLOPE_RADIUS, relying on the terrain's
+		# own slope for everything in between — confirmed via diagnostic
+		# that a hotdog can rest indefinitely on the big slope's own seam
+		# area (where the two pits' cones meet and get angularly trimmed —
+		# see _slope_outer_radius) well inside that radius, with a near-zero
+		# residual velocity and nothing correcting it. This "everywhere
+		# outside the close spring zone" nudge closes that gap too, not
+		# just the fully-flat area beyond the slope.
 		body.apply_central_force(-offset.normalized() * _long_range_return_strength)
 
 # Anything genuinely on the table never gets anywhere near this low —
