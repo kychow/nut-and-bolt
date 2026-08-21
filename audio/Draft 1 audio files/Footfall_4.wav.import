@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://i4u0d3yeotwm"
+path="res://.godot/imported/Footfall_4.wav-ac4e0a0670cd824b158d0b40b1ce9f11.sample"
+
+[deps]
+
+source_file="res://audio/Draft 1 audio files/Footfall_4.wav"
+dest_files=["res://.godot/imported/Footfall_4.wav-ac4e0a0670cd824b158d0b40b1ce9f11.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2
