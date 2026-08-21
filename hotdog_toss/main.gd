@@ -408,6 +408,7 @@ var _debug_nodes: Array[Node3D] = []
 # 0 = no skin (primitives visible); 1..SKIN_DEFS.size() = SKIN_DEFS[index-1].
 var _current_skin_index: int = 0
 var _head_skin_root: Node3D = null
+var _body_skin_root: Node3D = null
 var _skin_label: Label
 
 func _ready() -> void:
@@ -1618,6 +1619,9 @@ func _teardown_skin() -> void:
 	if _head_skin_root:
 		_head_skin_root.queue_free()
 		_head_skin_root = null
+	if _body_skin_root:
+		_body_skin_root.queue_free()
+		_body_skin_root = null
 
 func _set_primitives_visible(is_visible: bool) -> void:
 	for arm in [_arm_left, _arm_right]:
@@ -1735,14 +1739,75 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	add_child(static_inst)
 	_head_skin_root = static_inst
 
+	_setup_body_skin(def, source_skeleton, source_mesh_inst.mesh, head_idx, head_rest)
+
 	if bbox.size != Vector3.ZERO:
 		_apply_head_mouth_hole(static_inst, bbox, head_scale)
+
+## Gives the floating head an actual body — everything but the head and
+## arms (see _extract_body_mesh) from the SAME source mesh, in the SAME
+## bind-pose coordinate space, so it attaches at the neck with no seam
+## using the exact same rest-pose basis the head itself uses. Unlike the
+## head/arms (each independently scaled to fit this game's own geometry —
+## see SKIN_DEFS), the body's scale is derived, not hand-measured: whatever
+## uniform factor makes the body's own natural (neck-to-feet) height exactly
+## span the visible gap from HEAD_POS down to the tabletop, so it always
+## reaches the table regardless of a given rig's real proportions. Also
+## builds a matching STATIC collision hull (a convex hull, not a concave
+## trimesh — see _make_funnel_pit's own comment on why a hand-built concave
+## shape gave zero collision response under Jolt) on LAYER_FACE, the same
+## layer the head itself collides on, so hotdogs/arms already masked for
+## that layer bounce off it with no extra collision-mask setup.
+func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh: Mesh, head_idx: int, head_rest: Transform3D) -> void:
+	var excluded_bones := [head_idx]
+	for side_bones in [def["left_arm_bones"], def["right_arm_bones"]]:
+		for key in ["upper", "fore", "hand"]:
+			var idx := source_skeleton.find_bone(side_bones[key])
+			if idx >= 0:
+				excluded_bones.append(idx)
+
+	var body_mesh := _extract_body_mesh(source_mesh, excluded_bones)
+	if body_mesh.get_surface_count() == 0:
+		return
+	var body_bbox: AABB = body_mesh.get_aabb()
+	if body_bbox.size.y <= 0.0:
+		return
+
+	var body_top_local := Vector3(
+		body_bbox.position.x + body_bbox.size.x * 0.5,
+		body_bbox.position.y + body_bbox.size.y,
+		body_bbox.position.z + body_bbox.size.z * 0.5,
+	)
+	var body_scale := (HEAD_POS.y - TABLE_TOP_Y) / body_bbox.size.y
+	var body_basis := head_rest.basis.scaled(Vector3.ONE * body_scale)
+	var body_transform := Transform3D(body_basis, HEAD_POS - body_basis * body_top_local)
+
+	var body_container := Node3D.new()
+	body_container.transform = body_transform
+	add_child(body_container)
+	_body_skin_root = body_container
+
+	var body_mesh_inst := MeshInstance3D.new()
+	body_mesh_inst.mesh = body_mesh
+	body_container.add_child(body_mesh_inst)
+
+	var body_static := StaticBody3D.new()
+	body_static.name = "SkinBody"
+	body_static.collision_layer = 0
+	body_static.set_collision_layer_value(LAYER_FACE, true)
+	body_static.physics_material_override = _environment_material
+	var body_coll := CollisionShape3D.new()
+	body_coll.shape = body_mesh.create_convex_shape(true, false)
+	body_static.add_child(body_coll)
+	body_container.add_child(body_static)
 
 const MOUTH_HOLE_SHADER_CODE := "
 shader_type spatial;
 uniform vec3 mouth_center_world;
 uniform float mouth_radius_world;
 uniform vec4 base_color : source_color = vec4(1.0, 1.0, 1.0, 1.0);
+uniform sampler2D base_texture : source_color;
+uniform bool has_texture = false;
 
 varying vec3 v_world_pos;
 
@@ -1758,6 +1823,17 @@ void fragment() {
 	// inside rather than true background, confirmed via diagnostic render.
 	if (distance(v_world_pos, mouth_center_world) < mouth_radius_world) {
 		ALBEDO = vec3(0.02, 0.02, 0.02);
+	} else if (has_texture) {
+		// Some skins (Joey Chestnut) bake facial detail — eyes, mouth — into
+		// a small textured surface rather than flat per-surface colors;
+		// confirmed via diagnostic that this surface's own material has
+		// albedo forced to flat white specifically because the texture is
+		// meant to supply all of its actual color. Falling back to base_color
+		// (as this shader originally did unconditionally) discarded that
+		// texture entirely, rendering it as a blank white patch instead of a
+		// face — sample it here instead, same as the un-shadered surfaces
+		// already do natively.
+		ALBEDO = texture(base_texture, UV).rgb;
 	} else {
 		ALBEDO = base_color.rgb;
 	}
@@ -1804,14 +1880,15 @@ func _measure_bone_weighted_aabb(mesh: Mesh, bone_idx: int, min_weight: float = 
 		return AABB()
 	return AABB(min_v, max_v - min_v)
 
-## Builds a plain, non-skinned ArrayMesh containing just the triangles
-## whose vertices are predominantly weighted to one bone — used to pull a
-## static copy of a skin's head geometry out of its full-body skinned
-## mesh (see _setup_head_skin for why the head is rendered this way
-## instead of staying a live skinned mesh like the arms). Vertex/normal
-## data only — these are flat-colored materials with no UVs that matter
-## here, and the head never animates, so nothing else is needed.
-func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 0.4) -> ArrayMesh:
+## Shared triangle-copy machinery behind _extract_bone_weighted_mesh (a
+## skin's head) and _extract_body_mesh (everything else — see
+## _setup_head_skin) — builds a plain, non-skinned ArrayMesh containing just
+## the triangles whose vertices all satisfy keep_vertex(vertex_index,
+## bones_per_vertex, bones, weights). UVs are preserved (not just
+## vertex/normal) — most surfaces here are flat-colored with no UVs that
+## matter, but at least one (Joey Chestnut's face) bakes its actual detail
+## into a texture, and losing UVs would leave that surface unsampleable.
+func _extract_mesh_where(mesh: Mesh, keep_vertex: Callable) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	for surf in range(mesh.get_surface_count()):
 		var arrays := mesh.surface_get_arrays(surf)
@@ -1819,6 +1896,10 @@ func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 
 		var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
 		var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
 		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+		# A surface with no UVs at all reports this slot as null, not an
+		# empty array (confirmed via diagnostic against the sprinter rig,
+		# which has none) — the typed assignment below would otherwise fail.
+		var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV] if arrays[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 		if verts.is_empty() or bones.is_empty():
 			continue
@@ -1827,15 +1908,12 @@ func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 
 		var keep := PackedByteArray()
 		keep.resize(verts.size())
 		for i in range(verts.size()):
-			var w := 0.0
-			for b in range(bones_per_vertex):
-				if bones[i * bones_per_vertex + b] == bone_idx:
-					w += weights[i * bones_per_vertex + b]
-			keep[i] = 1 if w >= min_weight else 0
+			keep[i] = 1 if keep_vertex.call(i, bones_per_vertex, bones, weights) else 0
 
 		var tri_count := (indices.size() / 3) if not indices.is_empty() else (verts.size() / 3)
 		var new_verts := PackedVector3Array()
 		var new_normals := PackedVector3Array()
+		var new_uvs := PackedVector2Array()
 		for t in range(tri_count):
 			var i0: int
 			var i1: int
@@ -1856,6 +1934,10 @@ func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 
 					new_normals.append(normals[i0])
 					new_normals.append(normals[i1])
 					new_normals.append(normals[i2])
+				if not uvs.is_empty():
+					new_uvs.append(uvs[i0])
+					new_uvs.append(uvs[i1])
+					new_uvs.append(uvs[i2])
 
 		if new_verts.is_empty():
 			continue
@@ -1864,9 +1946,41 @@ func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 
 		new_arrays[Mesh.ARRAY_VERTEX] = new_verts
 		if not new_normals.is_empty():
 			new_arrays[Mesh.ARRAY_NORMAL] = new_normals
+		if not new_uvs.is_empty():
+			new_arrays[Mesh.ARRAY_TEX_UV] = new_uvs
 		out.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, new_arrays)
 		out.surface_set_material(out.get_surface_count() - 1, mesh.surface_get_material(surf))
 	return out
+
+## Builds a plain, non-skinned ArrayMesh containing just the triangles
+## whose vertices are predominantly weighted to one bone — used to pull a
+## static copy of a skin's head geometry out of its full-body skinned
+## mesh (see _setup_head_skin for why the head is rendered this way
+## instead of staying a live skinned mesh like the arms).
+func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 0.4) -> ArrayMesh:
+	return _extract_mesh_where(mesh, func(i: int, bpv: int, bones: PackedInt32Array, weights: PackedFloat32Array) -> bool:
+		var w := 0.0
+		for b in range(bpv):
+			if bones[i * bpv + b] == bone_idx:
+				w += weights[i * bpv + b]
+		return w >= min_weight
+	)
+
+## The complement of _extract_bone_weighted_mesh: everything NOT
+## predominantly weighted to one of excluded_bones — used to pull a skin's
+## torso+legs out as a separate static "body" beneath its head, excluding
+## both the head bone (its own separate mesh, see above) and every arm bone
+## (those stay a LIVE skinned mesh, posed each tick onto the physics arms —
+## see _setup_arm_skin; a static copy of them here would just double up as
+## a second, non-moving arm frozen in the rig's rest pose).
+func _extract_body_mesh(mesh: Mesh, excluded_bones: Array) -> ArrayMesh:
+	return _extract_mesh_where(mesh, func(i: int, bpv: int, bones: PackedInt32Array, weights: PackedFloat32Array) -> bool:
+		var excluded_w := 0.0
+		for b in range(bpv):
+			if excluded_bones.has(bones[i * bpv + b]):
+				excluded_w += weights[i * bpv + b]
+		return excluded_w < 0.4
+	)
 
 ## Marks the mouth on a skin's head mesh — the skinned-mesh equivalent of
 ## the placeholder head's CSG subtraction, since you can't boolean-
@@ -1908,9 +2022,14 @@ func _apply_head_mouth_hole(mesh_inst: MeshInstance3D, bbox: AABB, head_scale: f
 		mat.set_shader_parameter("mouth_radius_world", mouth_radius_world)
 		var orig_mat := mesh_inst.mesh.surface_get_material(surf)
 		var orig_color := Color.WHITE
+		var orig_texture: Texture2D = null
 		if orig_mat is BaseMaterial3D:
 			orig_color = (orig_mat as BaseMaterial3D).albedo_color
+			orig_texture = (orig_mat as BaseMaterial3D).albedo_texture
 		mat.set_shader_parameter("base_color", orig_color)
+		mat.set_shader_parameter("has_texture", orig_texture != null)
+		if orig_texture != null:
+			mat.set_shader_parameter("base_texture", orig_texture)
 		mesh_inst.set_surface_override_material(surf, mat)
 
 ## Poses one arm's three skinned bones to match its physics capsules —
