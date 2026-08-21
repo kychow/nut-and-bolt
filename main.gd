@@ -13,6 +13,7 @@ extends Node3D
 var _player: Player
 
 var _has_finished := false
+var _win_screen_shown := false
 
 var _elapsed_time := 0.0
 var _hud_canvas_layer = null
@@ -411,8 +412,59 @@ func _create_hud() -> void:
 	_timer_label = label
 
 
+func _create_win_screen() -> void:
+	_win_screen_shown = true
+
+	# Dark overlay background.
+	var overlay := ColorRect.new()
+	overlay.name = "WinOverlay"
+	overlay.color = Color(0.0, 0.0, 0.0, 0.7)
+	overlay.anchors_preset = Control.PRESET_FULL_RECT
+	_hud_canvas_layer.add_child(overlay)
+
+	# Center container for all win text.
+	var center := CenterContainer.new()
+	center.name = "WinCenter"
+	center.anchors_preset = Control.PRESET_FULL_RECT
+	_hud_canvas_layer.add_child(center)
+
+	var vbox := VBoxContainer.new()
+	vbox.name = "WinVBox"
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 20)
+	center.add_child(vbox)
+
+	# Title.
+	var title := Label.new()
+	title.name = "WinTitle"
+	title.text = "YOU WIN!"
+	title.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 64)
+	vbox.add_child(title)
+
+	# Final time.
+	var time_label := Label.new()
+	time_label.name = "WinTime"
+	time_label.text = "Time: %02.1fs" % _elapsed_time
+	time_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	time_label.add_theme_font_size_override("font_size", 48)
+	vbox.add_child(time_label)
+
+	# Restart instruction.
+	var instruction := Label.new()
+	instruction.name = "WinInstruction"
+	instruction.text = "Press R to restart"
+	instruction.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	instruction.add_theme_font_size_override("font_size", 28)
+	vbox.add_child(instruction)
+
+
 func _process(delta: float) -> void:
 	if _has_finished:
+		if not _win_screen_shown:
+			_create_win_screen()
+		if Input.is_key_pressed(KEY_R):
+			get_tree().reload_current_scene()
 		return
 
 	_elapsed_time += delta
