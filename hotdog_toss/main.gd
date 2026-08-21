@@ -209,6 +209,19 @@ var _throw_velocity_samples: float = 16.0
 # feel call, not a physical fact.
 var _release_velocity_multiplier: float = 3.0
 
+# A gentle horizontal spring pulling anything within a funnel's outer
+# radius (DIP_OUTER_RADIUS) toward that pit's exact XZ center — the slope
+# and flat pit floor alone reliably get a settling hotdog CLOSE to center
+# (confirmed via earlier diagnostic) but not necessarily to the exact
+# bottom, and a resting arm segment can find complex stuck configurations
+# on the slope that friction alone won't resolve (a multi-joint chain
+# draped across a curved surface, unlike a single hotdog capsule). This
+# force is scaled by distance from center like a real spring, so it's
+# naturally zero right at the target point rather than needing a deadzone,
+# and is gentle enough that a player actively driving the hand nearby
+# (spring stiffness ~48) isn't fighting it in any noticeable way.
+var _funnel_center_pull_strength: float = 3.0
+
 # PD spring driving the hand toward the target. Damping is set to ~40% of
 # critical damping (2*sqrt(stiffness*mass)) for this stiffness/mass, which
 # is the "fluid but bouncy" regime (visible overshoot, a couple of settling
@@ -669,6 +682,7 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Target accel", 100.0, 1200.0, 10.0, _target_accel, func(v): _target_accel = v)
 	_add_slider(box, "Throw velocity window", 1.0, 40.0, 1.0, _throw_velocity_samples, func(v): _throw_velocity_samples = v)
 	_add_slider(box, "Release velocity multiplier", 1.0, 8.0, 0.25, _release_velocity_multiplier, func(v): _release_velocity_multiplier = v)
+	_add_slider(box, "Funnel center pull", 0.0, 15.0, 0.5, _funnel_center_pull_strength, func(v): _funnel_center_pull_strength = v)
 	_add_slider(box, "Arm bounce", 0.0, 1.0, 0.05, _arm_material.bounce, func(v): _arm_material.bounce = v)
 	_add_slider(box, "Arm friction", 0.0, 1.0, 0.05, _arm_material.friction, func(v): _arm_material.friction = v)
 	_add_slider(box, "Hotdog bounce", 0.0, 1.0, 0.05, _hotdog_material.bounce, func(v): _hotdog_material.bounce = v)
@@ -1218,6 +1232,19 @@ func _terrain_world_height_at(world_x: float, world_z: float) -> float:
 	var dist_right := Vector2(world_x - RIGHT_PIT_POS.x, world_z - RIGHT_PIT_POS.z).length()
 	return TABLE_TOP_Y + _terrain_height_at_radius(minf(dist_left, dist_right))
 
+## Nudges anything within a funnel's outer radius toward that pit's exact
+## XZ center — see _funnel_center_pull_strength for why this exists on top
+## of the slope/floor geometry. Horizontal only (no Y component), so it
+## never fights gravity or lifts anything; within the funnel, "toward
+## center" and "downhill" are the same direction anyway, since terrain
+## height there is purely a function of radius.
+func _apply_funnel_center_pull(body: RigidBody3D) -> void:
+	for pit_pos in [LEFT_PIT_POS, RIGHT_PIT_POS]:
+		var offset := Vector3(body.global_position.x - pit_pos.x, 0.0, body.global_position.z - pit_pos.z)
+		if offset.length() < DIP_OUTER_RADIUS:
+			body.apply_central_force(-offset * _funnel_center_pull_strength)
+			return
+
 ## Topographic contour rings (like a map's elevation lines) at fixed radius
 ## steps around a pit, each drawn flat at its own actual terrain height —
 ## a temporary read-the-terrain aid while shaping the slopes, toggled by
@@ -1717,6 +1744,11 @@ func _physics_process(delta: float) -> void:
 	if Input.is_action_just_pressed("cycle_skin"):
 		_cycle_skin()
 
+	for chain in _hotdog_chains:
+		for seg in chain:
+			if is_instance_valid(seg):
+				_apply_funnel_center_pull(seg)
+
 	_process_arm(_arm_left, delta)
 	_process_arm(_arm_right, delta)
 
@@ -1758,6 +1790,10 @@ func _process_arm(arm: ArmState, delta: float) -> void:
 	var error := arm.target_pos - arm.hand.global_position
 	var force := error * _hand_spring_stiffness - arm.hand.linear_velocity * _hand_spring_damping
 	arm.hand.apply_central_force(force)
+
+	_apply_funnel_center_pull(arm.upper_arm)
+	_apply_funnel_center_pull(arm.forearm)
+	_apply_funnel_center_pull(arm.hand)
 
 	_update_arm_skin_pose(arm)
 	_record_hand_velocity(arm)
