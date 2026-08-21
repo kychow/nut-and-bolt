@@ -184,18 +184,18 @@ func _create_track() -> void:
 func _create_lane_lines() -> void:
 	# Three lanes:
 	#
-	#     | lane | lane | lane |
+	#     | lane -3 | lane -2 | lane - 1 | lane 0 | lane 1 | lane 2 | lane 3 
 	#       -3      0      3
 	#
 	# These lines separate the lanes.
 
-	for lane_x in [-3.0, 3.0]:
+	for lane_x in range(-3, 4):
 		var line := _strip(
 			0.15,
-			0.05,
+			0.01,
 			track_length,
 			Color.WHITE,
-			lane_x,
+			lane_x * 1.5,
 			0.11,
 			-track_length / 2.0,
 			"LaneLine"
