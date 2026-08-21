@@ -56,7 +56,8 @@ func _load_character() -> void:
 
 	character.name = "Bolt"
 	character.scale = Vector3.ONE * character_scale
-	character.position.y += 0.032
+	character.position.y += 0.03
+	character.position.x += 0.75
 	character.rotation_degrees.y = 180
 
 	add_child(character)

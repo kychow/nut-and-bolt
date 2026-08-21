@@ -220,19 +220,19 @@ func _create_lane_lines() -> void:
 
 
 func _create_start_line() -> void:
-	var start := MeshInstance3D.new()
+	var start_line := MeshInstance3D.new()
 
-	start.name = "StartLine"
+	start_line.name = "StartLine"
 
 	var mesh := BoxMesh.new()
 
 	mesh.size = Vector3(
 		track_width + 1.0,
 		0.05,
-		0.5
+		1
 	)
 
-	start.mesh = mesh
+	start_line.mesh = mesh
 
 	var material := StandardMaterial3D.new()
 
@@ -242,15 +242,15 @@ func _create_start_line() -> void:
 		BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	)
 
-	start.material_override = material
+	start_line.material_override = material
 
-	start.position = Vector3(
+	start_line.position = Vector3(
 		0.0,
-		0.11,
-		0.0
+		0.1,
+		-0.4
 	)
 
-	add_child(start)
+	add_child(start_line)
 
 
 func _create_finish_line() -> void:
