@@ -205,38 +205,34 @@ var _throw_velocity_samples: float = 16.0
 var _hand_spring_stiffness: float = 48.0
 var _hand_spring_damping: float = 3.5
 
-# The shoulder is ALSO a script-driven Hooke's-law torque spring (aligning
-# the upper arm's pointing direction), not just a passively-dragged joint —
-# native Generic6DOFJoint3D spring fields are deliberately avoided (Jolt has
-# multiple undocumented spring modes with no documented way to tell which
-# one Godot is actually using). The wrist stays passive (just its existing
-# hard angular limit) — unlike the shoulder, it's limited on all 3 axes
-# including roll, and an added active spring there fought that limit badly
-# enough to peg the hand's angular velocity at an engine safety ceiling; not
-# worth chasing down further given how minor the wrist's motion range is.
-var _shoulder_spring_stiffness: float = 22.0
-var _shoulder_spring_damping: float = 3.0
-
-# How fast the shoulder's aim direction is allowed to chase the target
-# direction (see _drive_shoulder_spring) — lower means more lag/whip before
-# the upper arm reorients, higher means it snaps toward the target almost
-# immediately. Each arm keeps its own ArmState.shoulder_aim_dir, starting
-# uninitialized (Vector3.ZERO is a sentinel meaning "snap to the current
-# direction on the first tick").
-var _shoulder_aim_lag: float = 0.5
+# The shoulder used to ALSO be a script-driven torque spring, independently
+# aiming the upper arm's pointing direction at the target — removed (see
+# reference_arm_physics_demo.html, which has no equivalent mechanism at
+# all: its upper-arm direction is a pure byproduct of where the hand ends
+# up, not something separately driven). With both the hand spring AND that
+# torque converging on the same target, the whole chain tended to
+# straighten out; now only the hand is actively driven, and the upper arm's
+# orientation comes purely from what the elbow/wrist joints transmit back
+# from that pull plus gravity — same free-hanging treatment as the elbow.
+# The wrist stays passive too (just its existing hard angular limit) — an
+# earlier attempt at an active wrist spring fought that limit badly enough
+# to peg the hand's angular velocity at an engine safety ceiling; not worth
+# chasing down further given how minor the wrist's motion range is.
 
 # Arm segments get a bit of extra gravity_scale on top of the engine default
 # so a released/undriven arm visibly sags — but not so much that the spring
 # above can no longer lift it (see _hand_spring_stiffness).
 var _arm_gravity_scale: float = 1.2
 
-# The shoulder has genuinely zero angular limit (a real shoulder's wide
-# range of motion, per the design), so nothing but this passively damps its
-# spin around its own long axis — the align-torque spring above only
-# corrects pointing direction, not roll, by design (see _align_torque).
-# Without a reasonably strong damp here, that roll can idle in a persistent
-# low-level spin indefinitely rather than settling.
-var _arm_angular_damp: float = 8.0
+# The shoulder and elbow both have genuinely zero angular limit, so this is
+# now the ONLY thing damping their spin at all (previously the shoulder's
+# own align-torque spring also corrected its pointing direction, though
+# never its roll). Lowered from 8.0 now that nothing else is damping the
+# shoulder — trying for more of the reference demo's visible overshoot/
+# wobble — but kept well above 0, since a truly undamped free shoulder
+# idled in a persistent low-level spin indefinitely rather than settling
+# (confirmed in earlier testing).
+var _arm_angular_damp: float = 4.0
 
 # Gravity on the CONTROL TARGET itself, not just the physical arm. Without
 # this, letting go of all keys leaves the target frozen at whatever height
@@ -277,7 +273,6 @@ class ArmState:
 
 	var target_pos: Vector3
 	var target_vel: Vector3 = Vector3.ZERO
-	var shoulder_aim_dir: Vector3 = Vector3.ZERO
 
 	# Rolling window of recent hand velocity, so a throw can use the PEAK
 	# speed from the last ~1/6 second rather than whatever the hand's
@@ -644,9 +639,6 @@ func _setup_tuning_ui() -> void:
 
 	_add_slider(box, "Hand spring stiffness", 0.0, 120.0, 1.0, _hand_spring_stiffness, func(v): _hand_spring_stiffness = v)
 	_add_slider(box, "Hand spring damping", 0.0, 30.0, 0.5, _hand_spring_damping, func(v): _hand_spring_damping = v)
-	_add_slider(box, "Shoulder spring stiffness", 0.0, 60.0, 1.0, _shoulder_spring_stiffness, func(v): _shoulder_spring_stiffness = v)
-	_add_slider(box, "Shoulder spring damping", 0.0, 15.0, 0.25, _shoulder_spring_damping, func(v): _shoulder_spring_damping = v)
-	_add_slider(box, "Shoulder aim lag", 0.1, 10.0, 0.1, _shoulder_aim_lag, func(v): _shoulder_aim_lag = v)
 	_add_slider(box, "Arm gravity scale", 0.0, 3.0, 0.1, _arm_gravity_scale, func(v):
 		_arm_gravity_scale = v
 		for arm in [_arm_left, _arm_right]:
@@ -1733,43 +1725,8 @@ func _process_arm(arm: ArmState, delta: float) -> void:
 	var force := error * _hand_spring_stiffness - arm.hand.linear_velocity * _hand_spring_damping
 	arm.hand.apply_central_force(force)
 
-	_drive_shoulder_spring(arm, delta)
 	_update_arm_skin_pose(arm)
 	_record_hand_velocity(arm)
-
-## Aligns only the body's long (local Y) axis toward desired_dir — deliberately
-## NOT a full 3-axis orientation spring. A capsule is rotationally symmetric
-## around its own long axis, so there's no physically meaningful "desired
-## roll" to spring toward, and that axis has much lower moment of inertia
-## than the other two — a full orientation spring drives it with the same
-## damping used for the (much higher-inertia) pointing direction, which is
-## wildly underdamped for roll and causes the body to spin in place
-## indefinitely around its own axis even after it's pointing the right way.
-## cross(current, desired) has no such roll component by construction: it's
-## zero exactly when current already equals desired, regardless of roll.
-func _align_torque(body: RigidBody3D, desired_dir: Vector3, stiffness: float, damping: float) -> Vector3:
-	var current_dir := body.global_transform.basis.y
-	return current_dir.cross(desired_dir) * stiffness - body.angular_velocity * damping
-
-func _drive_shoulder_spring(arm: ArmState, delta: float) -> void:
-	# The upper arm doesn't aim directly at the raw target direction — that
-	# would let the shoulder reorient just as fast as the target moves,
-	# which (confirmed via diagnostic) makes the arm swing to fully vertical
-	# almost as soon as the hand does, skipping the "elbow lags behind,
-	# forming a V, before being physically dragged up" whip feel entirely.
-	# shoulder_aim_dir instead chases the raw direction slowly (slerp per
-	# tick, rate set by _shoulder_aim_lag), so the upper arm's own reaim is
-	# explicitly, reliably delayed — independent of the current spring
-	# stiffness/mass/motor tuning, all of which turned out to have much
-	# less effect on this than expected once actually measured.
-	var to_target := arm.target_pos - arm.shoulder_pos
-	if to_target.length() < 0.001:
-		return
-	var raw_dir := to_target.normalized()
-	if arm.shoulder_aim_dir == Vector3.ZERO:
-		arm.shoulder_aim_dir = raw_dir
-	arm.shoulder_aim_dir = arm.shoulder_aim_dir.slerp(raw_dir, clampf(_shoulder_aim_lag * delta, 0.0, 1.0))
-	arm.upper_arm.apply_torque(_align_torque(arm.upper_arm, arm.shoulder_aim_dir, _shoulder_spring_stiffness, _shoulder_spring_damping))
 
 func _reset_arm(arm: ArmState) -> void:
 	arm.upper_arm.global_transform = arm.rest_transforms["upper_arm"]
