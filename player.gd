@@ -44,6 +44,7 @@ func _load_character() -> void:
 
 	character.name = "Athlete"
 	character.scale = Vector3.ONE * character_scale
+	character.rotation_degrees.y = 180
 
 	add_child(character)
 
@@ -114,6 +115,8 @@ func _setup_bones() -> void:
 
 	print("Left thigh bone index: ", left_thigh)
 	print("Right thigh bone index: ", right_thigh)
+	
+	
 
 
 func _physics_process(delta: float) -> void:
@@ -133,9 +136,6 @@ func _physics_process(delta: float) -> void:
 		left_target = left_neutral * Quaternion.from_euler(
 			Vector3(swing_angle, 0.0, 0.0)
 		)
-		
-		
-		
 
 	if d_pressed:
 		right_target = right_neutral * Quaternion.from_euler(
