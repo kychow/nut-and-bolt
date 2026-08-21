@@ -390,7 +390,7 @@ func _setup_camera() -> void:
 
 	camera.current = true
 
-	camera.fov = 55.0
+	camera.fov = 20.0
 
 func _create_hud() -> void:
 	var canvas_layer := CanvasLayer.new()
