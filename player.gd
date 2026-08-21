@@ -18,6 +18,11 @@ extends Node3D
 @export var max_hold_time := 0.15
 @export var hold_penalty_mult := 8.0
 
+@export_group("Audio")
+@export var footstep_volume_db := 0.0
+@export var footstep_pitch_min := 0.92
+@export var footstep_pitch_max := 1.08
+
 var character: Node3D
 var skeleton: Skeleton3D
 
@@ -47,10 +52,15 @@ var active_leg := 0 # -1 = Left (A), 1 = Right (D)
 var key_hold_timer := 0.0
 var animation_phase := 0.0 # Stride cycle (0.0 to PI)
 
+# Audio
+var footstep_player: AudioStreamPlayer
+var footstep_streams: Array[AudioStream] = []
+
 func _ready() -> void:
 	_load_character()
 	_find_skeleton()
 	_setup_bones()
+	_setup_footsteps()
 
 func _load_character() -> void:
 	var glb_scene := load("res://assets/jamaican-sprinter-rigged.glb")
@@ -108,12 +118,37 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event.is_action_pressed("ui_right") or event.keycode == KEY_D:
 		_process_step(1)
 
+func _setup_footsteps() -> void:
+	footstep_player = AudioStreamPlayer.new()
+	footstep_player.name = "FootstepPlayer"
+	footstep_player.bus = "Master"
+	footstep_player.volume_db = footstep_volume_db
+	add_child(footstep_player)
+
+	var base_path := "res://audio/Draft 1 audio files/Footfall_%d.wav"
+	for i in range(1, 7):
+		var stream_path := base_path % i
+		var stream := load(stream_path) as AudioStream
+		if stream != null:
+			footstep_streams.append(stream)
+		else:
+			push_warning("Player: Could not load footstep stream: %s" % stream_path)
+
+func _play_footstep() -> void:
+	if footstep_player == null or footstep_streams.is_empty():
+		return
+	footstep_player.stream = footstep_streams.pick_random()
+	footstep_player.pitch_scale = randf_range(footstep_pitch_min, footstep_pitch_max)
+	footstep_player.volume_db = footstep_volume_db
+	footstep_player.play()
+
 func _process_step(leg: int) -> void:
 	if leg != active_leg:
 		active_leg = leg
 		key_hold_timer = 0.0
 		animation_phase = 0.0
 		current_speed = min(current_speed + push_force, max_speed)
+		_play_footstep()
 
 func _physics_process(delta: float) -> void:
 	if skeleton == null: return
