@@ -12,6 +12,12 @@ extends Node3D
 
 var _player: Player
 
+var _has_finished := false
+
+var _elapsed_time := 0.0
+var _hud_canvas_layer = null
+var _timer_label = null
+
 
 func _ready() -> void:
 	_setup_environment()
@@ -19,6 +25,8 @@ func _ready() -> void:
 	_setup_floor()
 	_spawn_player()
 	_setup_camera()
+
+	_create_hud()
 
 
 # ============================================================
@@ -86,6 +94,7 @@ func _setup_floor() -> void:
 	_create_track()
 	_create_lane_lines()
 	_create_start_line()
+	_create_finish_line()
 
 
 func _create_grass() -> void:
@@ -243,6 +252,36 @@ func _create_start_line() -> void:
 	add_child(start)
 
 
+func _create_finish_line() -> void:
+	var finish := MeshInstance3D.new()
+
+	finish.name = "FinishLine"
+
+	var mesh := BoxMesh.new()
+
+	mesh.size = Vector3(
+		track_width + 1.0,
+		0.05,
+		0.5
+	)
+
+	finish.mesh = mesh
+
+	var material := StandardMaterial3D.new()
+
+	material.albedo_color = Color.WHITE
+
+	finish.material_override = material
+
+	finish.position = Vector3(
+		0.0,
+		0.11,
+		-50.0
+	)
+
+	add_child(finish)
+
+
 func _strip(width: float, height: float, length: float, color: Color, x: float, y: float, z: float, label: String) -> MeshInstance3D:
 	var mesh_instance := MeshInstance3D.new()
 	var box := BoxMesh.new()
@@ -350,4 +389,34 @@ func _setup_camera() -> void:
 
 	camera.current = true
 
-	camera.fov = 20.0
+	camera.fov = 55.0
+
+func _create_hud() -> void:
+	var canvas_layer := CanvasLayer.new()
+	canvas_layer.name = "HUD"
+	add_child(canvas_layer)
+
+	var label := Label.new()
+	label.name = "TimerLabel"
+	#label.position = Vector2(0, -50)
+	label.size = Vector2(200, 50)
+	label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_size_override("font_size", 36)
+	label.text = "Time: %02.1fs" % _elapsed_time
+
+	canvas_layer.add_child(label)
+
+	_hud_canvas_layer = canvas_layer
+	_timer_label = label
+
+
+func _process(delta: float) -> void:
+	if _has_finished:
+		return
+
+	_elapsed_time += delta
+	_timer_label.text = "Time: %02.1fs" % _elapsed_time
+
+	if _player.position.z <= -50.0:
+		_has_finished = true
