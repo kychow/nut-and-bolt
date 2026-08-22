@@ -19,8 +19,20 @@ const LAYER_TABLE := 4
 const LAYER_GROUND := 5
 const LAYER_FACE := 6
 
-const HEAD_RADIUS := 1.05 * 1.5
-const MOUTH_RADIUS := 0.225 * 1.5 * 2.0
+# Reference head size for the shared (skin-independent) mouth-scoring
+# trigger's own position/size math below — NOT the visual head size anymore
+# (see SKIN_DEFS/_setup_head_skin: the old giant CSG placeholder head is
+# gone now that a skin is always shown — see _ready). Derived from the
+# Jamaican Sprinter's own head bbox half-width (0.115) at its own scale
+# (1.34, see SKIN_DEFS): 0.115 * 1.34 ≈ 0.154.
+const HEAD_RADIUS := 0.154
+
+# Half the previous version's ratio (was implicitly 0.675/1.575 ≈ 0.4286) —
+# per feedback, a smaller/harder scoring target at the same relative
+# position. Feeds MOUTH_RADIUS_RATIO below, which both this generic trigger
+# AND each skin's own visual mouth-hole (_apply_head_mouth_hole) use against
+# THEIR OWN measured head size — so this one change shrinks both, everywhere.
+const MOUTH_RADIUS := HEAD_RADIUS * 0.2143
 
 # How far past the front opening a hotdog's center must travel before it
 # counts as a score — placing the trigger volume itself this deep (rather
@@ -45,15 +57,6 @@ const MOUTH_Y_OFFSET := (MOUTH_HEIGHT_FRACTION - 0.5) * 2.0 * HEAD_RADIUS
 # head size rather than this game's HEAD_RADIUS.
 const MOUTH_RADIUS_RATIO := MOUTH_RADIUS / HEAD_RADIUS
 
-# Shoulder moved out from its original -0.3 by one original head length
-# (2 * the pre-scale-up 0.35 head radius = 0.7), i.e. further from the head,
-# then an additional 1/3 of the (now scaled-up) head radius further out
-# still, so the shoulder clears the head with a visible gap instead of
-# sitting inside its now much larger radius.
-const SHOULDER_POS := Vector3(-1.0 - HEAD_RADIUS / 3.0, 1.4, 0.05)
-# Second arm is a straight mirror of the first across x=0, matching the
-# already-mirrored LEFT_PIT_POS/RIGHT_PIT_POS pair below.
-const RIGHT_SHOULDER_POS := Vector3(-SHOULDER_POS.x, SHOULDER_POS.y, SHOULDER_POS.z)
 const UPPER_ARM_LEN := 0.35
 const FOREARM_LEN := 0.32
 const UPPER_ARM_RADIUS := 0.055
@@ -64,55 +67,51 @@ const MAX_REACH := UPPER_ARM_LEN + FOREARM_LEN
 
 const GRAB_RADIUS := 0.08
 
-const TABLE_TOP_Y := 1.05
-# Big floor now, not a small platform — footprint far bigger than the play
-# area the camera actually frames, reading as effectively infinite.
-const TABLE_SIZE := Vector3(20, TABLE_TOP_Y, 20)
+# --- "One avatar instance" layout ----------------------------------------
+#
+# Head, body, and arms all share the SAME per-skin scale (SKIN_DEFS
+# "scale", reused directly for the head/body transform too — see
+# _setup_head_skin) instead of the old giant-head/tiny-arm split. These
+# position constants are derived from the Jamaican Sprinter rig's own
+# measured bone positions at THAT skin's own scale (MAX_REACH /
+# (0.28 + 0.22) = 1.34 — confirmed via the same headless bone-inspection
+# script used for the original per-skin scale numbers):
+#   hips (waist) local y = 1.0
+#   head bbox center local y ≈ 1.7275
+#   upperarm_L/R local origin ≈ (±0.24, 1.46, 0)
+# Not pixel-perfect for the Joey Chestnut skin (its own scale, 1.1932, is
+# slightly different) — same kind of minor cross-skin mismatch that already
+# existed for head sizing before.
+
+# Waist height doubles as the table height — literally the avatar's own hip
+# bone, scaled (1.34 * 1.0).
+const TABLE_TOP_Y := 1.34
+
+# Flat table (no funnels/slopes — see _setup_table_and_pyramids), sized to
+# comfortably span both arms' reach circles (MAX_REACH from each of the
+# ± SHOULDER_POS.x positions below) with some margin.
+const TABLE_SIZE := Vector3(2.0, TABLE_TOP_Y, 1.2)
 const TABLE_POS := Vector3(0, TABLE_TOP_Y * 0.5, 0)
 
-# Two funnel-shaped dips sloping down into small pits, one on each side next
-# to where a hand naturally works — mirrored left/right of center so a
-# missed or knocked-off hotdog rolls toward whichever hand is closer. Only
-# the left arm exists so far, but the right pit is built now too, ready for
-# the second arm (stage 4).
-const PIT_RADIUS := 0.35
-const PIT_DEPTH := 0.24
-const DIP_OUTER_RADIUS := 0.9
-const LEFT_PIT_POS := Vector3(SHOULDER_POS.x, TABLE_TOP_Y, 0.45)
-const RIGHT_PIT_POS := Vector3(-SHOULDER_POS.x, TABLE_TOP_Y, 0.45)
+# Head attachment point — HEAD_POS.y is the avatar's own head-bbox-center,
+# scaled, measured up from the same hip reference as TABLE_TOP_Y:
+# 1.34 + 1.34*(1.7275 - 1.0).
+const HEAD_POS := Vector3(0, 2.31, 0)
 
-# Beyond the small funnel (which handles the final approach into the pit
-# itself), the WHOLE table now slants toward whichever pit is nearest, out
-# to this much bigger radius — so a hotdog placed or tossed anywhere on the
-# reachable table eventually rolls all the way in, not just near the rim.
-# Depth is picked for a ~23 degree slope: comfortably above the ~15 degree
-# angle of repose given the hotdog/table friction values (below that angle,
-# friction alone can hold an object in place indefinitely regardless of how
-# long the slope is — confirmed this matters via the small funnel needing a
-# steeper re-tune earlier to actually reach the pit rather than stall
-# partway), but NOT much more than that — a first pass at ~4 units of total
-# relief sent a hotdog spawned near the middle rolling off-screen with far
-# more speed than intended. Split at global x=0 (the midline between the
-# two mirrored pits) so the two basins drain into their own pit rather than
-# fighting each other in the overlap.
-const LARGE_SLOPE_RADIUS := 6.0
-const LARGE_SLOPE_DEPTH := 2.2
+# Shoulder position MUST match the rig's own "upperarm" bone origin exactly
+# (scaled, relative to HEAD_POS the same way TABLE_TOP_Y is relative to the
+# hip) — _update_arm_skin_pose overrides that bone's position directly to
+# arm.shoulder_pos every tick (confirmed by reading that function), so any
+# mismatch here is a visible seam between the live-posed arm and the static
+# torso, not just a feel/reach tweak.
+const SHOULDER_POS := Vector3(-0.32, 1.96, 0.0)
+# Second arm is a straight mirror of the first across x=0.
+const RIGHT_SHOULDER_POS := Vector3(-SHOULDER_POS.x, SHOULDER_POS.y, SHOULDER_POS.z)
 
-# Head center originally cleared the tabletop by a full head length (2 *
-# HEAD_RADIUS) of gap plus the head's own radius; shifted down by one more
-# head length (diameter, 2*HEAD_RADIUS) from that, per feedback that the
-# head sat too high, then back up by half a head length (HEAD_RADIUS) once
-# that turned out to sit too low (the skin head's own proportions extend
-# further below center than the primitive sphere, overlapping the
-# terrain) — net gap above the tabletop is now 2 * HEAD_RADIUS.
-#
-# Z is pushed back so the head's own FRONT surface (its +Z-facing edge,
-# HEAD_RADIUS in front of center) lands exactly at the back edge of the
-# small funnel (DIP_OUTER_RADIUS out from the pit center, on the -Z side) —
-# the funnel itself, not the much bigger outer slope, since that's the
-# part actually within arm's reach. Keeps the head from visually
-# overlapping the depth range the arms actually work in.
-const HEAD_POS := Vector3(0, TABLE_TOP_Y + HEAD_RADIUS + HEAD_RADIUS, LEFT_PIT_POS.z - DIP_OUTER_RADIUS - HEAD_RADIUS)
+# Single shared pyramid, centered between both hands and within comfortable
+# reach of each shoulder — no more funnels; a hotdog knocked off the table's
+# edge is simply despawned and replaced (see _respawn_hotdog_chain_if_lost).
+const PYRAMID_CENTER := Vector3(0, TABLE_TOP_Y, SHOULDER_POS.z + 0.4)
 
 const HOTDOG_RADIUS := 0.045
 const HOTDOG_LEN := 0.22
@@ -142,11 +141,11 @@ const BOUNCE_SOUND_MIN_SPEED := 0.6
 const HAND_OPEN_COLOR := Color(0.95, 0.75, 0.6)
 const HAND_CLOSED_COLOR := Color(0.85, 0.5, 0.35)
 
-# Optional cosmetic "skins" — a rigged .glb overlaid on the invisible
-# physics scaffolding (capsules stay the actual simulated bodies; the skin
-# is purely visual, driven by posing its skeleton's bones each tick to
-# match the physics arm segments). Index 0 in the cycle is always "no skin"
-# (the default primitives); SKIN_DEFS holds everything past that.
+# Cosmetic "skins" — a rigged .glb overlaid on the invisible physics
+# scaffolding (capsules stay the actual simulated bodies; the skin is purely
+# visual, driven by posing its skeleton's bones each tick to match the
+# physics arm segments). A skin is ALWAYS active (see _ready) — F2 cycles
+# between these two only, there's no "no skin" placeholder mode anymore.
 #
 # Bone mapping is per-skin since naming conventions vary between rigs.
 # Screen-left ("left_arm_bones") is this game's own screen-space left,
@@ -155,11 +154,12 @@ const HAND_CLOSED_COLOR := Color(0.85, 0.5, 0.35)
 # as this one, that means screen-left maps to the rig's "_R" bones.
 #
 # "scale" maps the source rig's own rest-pose arm reach (shoulder to wrist)
-# onto this game's MAX_REACH, so the skin's arm roughly matches how far the
-# physics hand can actually travel — computed here from the jamaican-
-# sprinter rig's own measured rest bone lengths (upperarm_L: 0.28,
-# forearm_L: 0.22, confirmed via a headless bone-inspection script before
-# writing this), not a guess.
+# onto this game's MAX_REACH, computed here from the jamaican-sprinter rig's
+# own measured rest bone lengths (upperarm_L: 0.28, forearm_L: 0.22,
+# confirmed via a headless bone-inspection script before writing this), not
+# a guess. Per the "one avatar instance" redesign, this SAME scale is now
+# also reused directly for the head + body (see _setup_head_skin) — no more
+# separate, much-larger "head_scale" field.
 const SKIN_DEFS := [
 	{
 		"name": "Jamaican Sprinter",
@@ -169,16 +169,6 @@ const SKIN_DEFS := [
 		"head_bone": "head",
 		"hide_root_bone": "hips",
 		"scale": MAX_REACH / (0.28 + 0.22),
-		# The head gets its OWN, much larger scale (applied only to the
-		# head skin instance, not the arms) — matched to this game's
-		# deliberately oversized cartoon head rather than the arm-reach
-		# scale above, which would otherwise leave a realistically-tiny
-		# head floating next to arm-scaled proportions. 0.22 is the source
-		# rig's own head size (a near-cube, measured via a headless
-		# vertex-bounds inspection of the vertices weighted to the "head"
-		# bone: local AABB size (0.21, 0.23, 0.22)), so this maps that
-		# measured size onto this game's head diameter (2 * HEAD_RADIUS).
-		"head_scale": (2.0 * HEAD_RADIUS) / 0.22,
 	},
 	{
 		"name": "Joey Chestnut",
@@ -195,11 +185,6 @@ const SKIN_DEFS := [
 		# the same headless bone-inspection approach as the sprinter rig
 		# above.
 		"scale": MAX_REACH / (0.30 + 0.26),
-		# Measured local AABB of vertices weighted to the "head" bone:
-		# (0.281, 0.302, 0.300) — close enough to a cube that, same as the
-		# sprinter rig, one averaged dimension stands in for a single
-		# "head diameter".
-		"head_scale": (2.0 * HEAD_RADIUS) / 0.294,
 	},
 ]
 
@@ -230,49 +215,18 @@ var _throw_velocity_samples: float = 16.0
 # feel call, not a physical fact.
 var _release_velocity_multiplier: float = 3.0
 
-# A gentle horizontal spring pulling anything within a funnel's outer
-# radius (DIP_OUTER_RADIUS) toward that pit's exact XZ center — the slope
-# and flat pit floor alone reliably get a settling hotdog CLOSE to center
-# (confirmed via earlier diagnostic) but not necessarily to the exact
-# bottom, and a resting arm segment can find complex stuck configurations
-# on the slope that friction alone won't resolve (a multi-joint chain
-# draped across a curved surface, unlike a single hotdog capsule). This
-# force is scaled by distance from center like a real spring, so it's
-# naturally zero right at the target point rather than needing a deadzone,
-# and is gentle enough that a player actively driving the hand nearby
-# (spring stiffness ~48) isn't fighting it in any noticeable way.
-var _funnel_center_pull_strength: float = 3.0
-
-# The sloped terrain (_terrain_height_at_radius) only actually slopes out to
-# LARGE_SLOPE_RADIUS from a pit — past that it's a flat plateau with zero
-# gradient, so a hard/lucky throw that overshoots the slope entirely lands
-# somewhere with nothing at all pulling it back (confirmed: it just sits
-# exactly where it landed, often out of camera frame — reads as "the hotdog
-# disappeared"). This is a FIXED-magnitude nudge toward whichever pit is
-# nearer, not a spring like _funnel_center_pull_strength above — a
-# proportional force would be enormous at, say, 8 units out for a hotdog
-# segment's tiny mass. It only fires beyond LARGE_SLOPE_RADIUS (see
-# _apply_funnel_center_pull); once that nudges something back inside the
-# slope, the real sloped geometry and the close-range spring pull both take
-# over on their own. Needs to comfortably clear static friction to ever
-# start a resting hotdog moving at all (confirmed via diagnostic: 0.15
-# left it dead stopped indefinitely — friction against a hotdog segment's
-# tiny mass, ~0.05, absorbed it completely) rather than a true "gentle"
-# feel being achievable here.
-var _long_range_return_strength: float = 0.6
-
-# CSGShape3D (the head) has no physics_material_override slot (confirmed
-# earlier — setting it there is a hard error), so a hotdog hitting the
-# solid skull otherwise bounces with whatever Jolt's engine-default
-# restitution happens to be, which reads as "hitting a wall" rather than a
-# clear bounce. Scripted instead: on the FIRST contact tick with the head
-# (see _on_hotdog_segment_body_entered), reflect the segment's incoming
-# velocity across the local "away from head center" direction — a real
-# bounce, not just a shove — then scale it by this restitution. Since the
-# mouth is a genuine hole in the CSG collision (no contact fires there at
-# all), this only ever triggers on the solid parts of the skull, so a
-# trajectory aimed AT the mouth just sails through untouched, while one that
-# clips the rim gets redirected — sometimes off into space, sometimes
+# Reflecting off the head's own collision using Jolt's default material
+# response reads as "hitting a wall" rather than a clear bounce (and,
+# confirmed via earlier diagnostic, isn't even usable directly — by the time
+# the collision signal fires, the default response has already killed most
+# of the incoming speed). Scripted instead: on the FIRST contact tick with
+# the head (see _on_hotdog_segment_body_entered), reflect the segment's
+# incoming velocity across the local "away from head center" direction — a
+# real bounce, not just a shove — then scale it by this restitution. Since
+# the mouth is a genuine hole in the head's collision (no contact fires
+# there at all), this only ever triggers on the solid parts of the skull, so
+# a trajectory aimed AT the mouth just sails through untouched, while one
+# that clips the rim gets redirected — sometimes off into space, sometimes
 # straight into the opening, exactly the "make it or bounce out" feel a
 # hoop-toss goal should have.
 var _head_bounce_restitution: float = 0.65
@@ -322,15 +276,16 @@ var _arm_angular_damp: float = 4.0
 # the target itself sink when not being actively held up, same as the arm.
 var _target_gravity: float = 9.8
 
-# Vertical camera framing: ground at the bottom, up to one more head-radius
-# of clear headspace above the head's own top edge. Originally this was
-# purely table-height-derived (2x table height above the tabletop), but
-# that no longer tracks anything meaningful now that the head's size and
-# position are set independently of the table — re-anchored to the head
-# itself so it doesn't end up cropped out of frame.
+# Camera tilted down to look over the tabletop (per feedback: "tilted
+# forwards about 30 degrees so you can see the whole tabletop") instead of
+# the old level, straight-on shot — see _setup_camera. Vertical frame now
+# spans from a bit in front of the table's near edge up to a bit above the
+# head, so the table + torso + head fill most of the frame; refined by eye
+# via render iteration, not meant to be exact to the pixel.
 const CAMERA_FOV_DEG := 45.0
-const FRAME_BOTTOM_Y := 0.0
-const FRAME_TOP_Y := HEAD_POS.y + HEAD_RADIUS * 2.0
+const CAMERA_TILT_DEG := 30.0
+const FRAME_BOTTOM_Y := TABLE_TOP_Y - 0.5
+const FRAME_TOP_Y := HEAD_POS.y + 0.6
 
 var _rest_dir: Vector3 = Vector3(0, -0.15, 1).normalized()
 
@@ -372,7 +327,11 @@ class ArmState:
 var _arm_left: ArmState
 var _arm_right: ArmState
 
-var _head_visual: Node3D
+## The skin head's own collision StaticBody3D (see _setup_head_skin) — the
+## old giant CSG placeholder head is gone (a skin is always shown now, see
+## _ready), so this is what _on_hotdog_segment_body_entered's head-bounce
+## check compares against.
+var _head_collision_body: StaticBody3D = null
 
 var _arm_material: PhysicsMaterial
 var _hotdog_material: PhysicsMaterial
@@ -417,17 +376,18 @@ func _ready() -> void:
 	_setup_environment()
 	_setup_lighting()
 	_setup_ground()
-	_setup_head()
 	_setup_mouth_trigger()
 	_arm_left = _setup_arm(SHOULDER_POS, "left_arm_")
 	_arm_right = _setup_arm(RIGHT_SHOULDER_POS, "right_arm_")
 	_setup_table_and_pyramids()
-	_setup_table_walls()
 	_setup_camera()
 	_setup_controls_ui()
 	_setup_score_ui()
 	_setup_skin_ui()
 	_setup_tuning_ui()
+	# Always show an avatar — no more "no skin" primitive placeholder mode
+	# (see _cycle_skin/_apply_skin).
+	_apply_skin(1)
 
 func _setup_materials() -> void:
 	# Starting values kept low — bounce compounds with the active hand
@@ -543,29 +503,6 @@ func _setup_ground() -> void:
 
 	add_child(ground)
 
-func _setup_head() -> void:
-	var head := CSGCombiner3D.new()
-	head.name = "Head"
-	head.use_collision = true
-	head.set_collision_layer_value(LAYER_FACE, true)
-	head.position = HEAD_POS
-
-	var skull := CSGSphere3D.new()
-	skull.radius = HEAD_RADIUS
-	skull.material = _material(Color(0.95, 0.8, 0.65))
-	head.add_child(skull)
-
-	var mouth := CSGCylinder3D.new()
-	mouth.operation = CSGShape3D.OPERATION_SUBTRACTION
-	mouth.radius = MOUTH_RADIUS
-	mouth.height = HEAD_RADIUS * 2.2
-	mouth.rotation_degrees.x = 90.0
-	mouth.position = Vector3(0, MOUTH_Y_OFFSET, 0)
-	head.add_child(mouth)
-
-	add_child(head)
-	_head_visual = head
-
 func _setup_mouth_trigger() -> void:
 	var trigger := Area3D.new()
 	trigger.name = "MouthScoreTrigger"
@@ -648,9 +585,16 @@ func _setup_camera() -> void:
 	var center_y := (FRAME_TOP_Y + FRAME_BOTTOM_Y) * 0.5
 	var distance := (frame_height * 0.5) / tan(deg_to_rad(CAMERA_FOV_DEG * 0.5))
 
-	camera.position = Vector3(0, center_y, distance)
+	# Tilted down CAMERA_TILT_DEG (see that constant) instead of the old
+	# level shot — the camera sits back and UP from the look-at point along
+	# the tilted axis, so pitching down still keeps the same framed subject
+	# in view rather than just rotating away from it.
+	var look_at_target := Vector3(0, center_y, PYRAMID_CENTER.z * 0.5)
+	var tilt_rad := deg_to_rad(CAMERA_TILT_DEG)
+	var back_dir := Vector3(0, sin(tilt_rad), cos(tilt_rad))
+	camera.position = look_at_target + back_dir * distance
 	add_child(camera)
-	camera.look_at(Vector3(0, center_y, 0), Vector3.UP)
+	camera.look_at(look_at_target, Vector3.UP)
 
 func _setup_controls_ui() -> void:
 	var layer := CanvasLayer.new()
@@ -744,8 +688,6 @@ func _setup_tuning_ui() -> void:
 	_add_slider(box, "Target accel", 100.0, 1200.0, 10.0, _target_accel, func(v): _target_accel = v)
 	_add_slider(box, "Throw velocity window", 1.0, 40.0, 1.0, _throw_velocity_samples, func(v): _throw_velocity_samples = v)
 	_add_slider(box, "Release velocity multiplier", 1.0, 8.0, 0.25, _release_velocity_multiplier, func(v): _release_velocity_multiplier = v)
-	_add_slider(box, "Funnel center pull", 0.0, 15.0, 0.5, _funnel_center_pull_strength, func(v): _funnel_center_pull_strength = v)
-	_add_slider(box, "Long-range return pull", 0.0, 3.0, 0.05, _long_range_return_strength, func(v): _long_range_return_strength = v)
 	_add_slider(box, "Head bounce restitution", 0.0, 1.5, 0.05, _head_bounce_restitution, func(v): _head_bounce_restitution = v)
 	_add_slider(box, "Arm bounce", 0.0, 1.0, 0.05, _arm_material.bounce, func(v): _arm_material.bounce = v)
 	_add_slider(box, "Arm friction", 0.0, 1.0, 0.05, _arm_material.friction, func(v): _arm_material.friction = v)
@@ -882,8 +824,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.upper_arm.set_collision_mask_value(LAYER_FACE, true)
 	arm.upper_arm.set_collision_mask_value(LAYER_TABLE, true)
 	arm.upper_arm.set_collision_mask_value(LAYER_HOTDOG, true)
-	arm.upper_arm.contact_monitor = true
-	arm.upper_arm.max_contacts_reported = 4
 	add_child(arm.upper_arm)
 
 	arm.forearm = _make_capsule_body("Forearm", FOREARM_RADIUS, FOREARM_LEN + FOREARM_RADIUS * 2.0, 0.8, Color(0.85, 0.6, 0.45), _arm_material)
@@ -895,8 +835,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.forearm.set_collision_mask_value(LAYER_FACE, true)
 	arm.forearm.set_collision_mask_value(LAYER_TABLE, true)
 	arm.forearm.set_collision_mask_value(LAYER_HOTDOG, true)
-	arm.forearm.contact_monitor = true
-	arm.forearm.max_contacts_reported = 4
 	add_child(arm.forearm)
 
 	arm.hand = _make_capsule_body("Hand", HAND_RADIUS, HAND_LEN + HAND_RADIUS * 2.0, 0.4, Color(0.95, 0.75, 0.6), _arm_material)
@@ -908,8 +846,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.hand.set_collision_mask_value(LAYER_FACE, true)
 	arm.hand.set_collision_mask_value(LAYER_TABLE, true)
 	arm.hand.set_collision_mask_value(LAYER_HOTDOG, true)
-	arm.hand.contact_monitor = true
-	arm.hand.max_contacts_reported = 4
 	add_child(arm.hand)
 	arm.hand_mesh = arm.hand.get_node("Mesh")
 
@@ -978,17 +914,13 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	_setup_debug_visuals(arm)
 	return arm
 
+## Just a flat table now — no funnels/slopes (see the "one avatar instance"
+## redesign doc comment near TABLE_TOP_Y): a single shared pyramid spawns at
+## PYRAMID_CENTER, and a hotdog knocked off the table's edge is despawned and
+## replaced rather than chased/pulled back (see
+## _respawn_hotdog_chain_if_lost) — there being no funnel to roll into
+## anymore, "pull it back" doesn't have anywhere meaningful to pull it to.
 func _setup_table_and_pyramids() -> void:
-	# CSG, not a plain box: a flat box's collision has no way to have a hole
-	# in it, and simply overlaying the sloped funnel geometry on top isn't
-	# enough on its own — the funnel dips BELOW the flat table's constant
-	# height everywhere except right at its outer rim, so the still-present
-	# flat table underneath stays the topmost surface and a hotdog never
-	# actually reaches the slope (confirmed via diagnostic: it rested at
-	# exactly flat-table height, not the lower sloped height). CSG's
-	# use_collision generates real hole-having collision to match the
-	# visual subtraction, which a hand-authored shape would have to
-	# replicate manually anyway.
 	var table := CSGBox3D.new()
 	table.name = "Table"
 	table.size = TABLE_SIZE
@@ -996,70 +928,10 @@ func _setup_table_and_pyramids() -> void:
 	table.collision_layer = 0
 	table.set_collision_layer_value(LAYER_TABLE, true)
 	table.material = _frosted_material(Color(0.5, 0.35, 0.22))
-	# CSGShape3D has no physics_material_override (confirmed earlier on the
-	# head — setting it there is a hard error), so this flat portion uses
-	# engine-default bounce/friction; the funnel walls and pit floors below
-	# (plain StaticBody3D, not CSG) still get the tuned _environment_material
-	# where it actually matters for gameplay (the sloped/rolling surfaces).
 	table.position = TABLE_POS
-
-	for pit_pos in [LEFT_PIT_POS, RIGHT_PIT_POS]:
-		var hole := CSGCylinder3D.new()
-		hole.operation = CSGShape3D.OPERATION_SUBTRACTION
-		hole.radius = LARGE_SLOPE_RADIUS
-		hole.height = TABLE_TOP_Y * 3.0
-		hole.position = pit_pos - TABLE_POS
-		table.add_child(hole)
-
 	add_child(table)
 
-	_make_funnel_pit(LEFT_PIT_POS)
-	_make_funnel_pit(RIGHT_PIT_POS)
-	_make_big_slope(LEFT_PIT_POS)
-	_make_big_slope(RIGHT_PIT_POS)
-	_setup_terrain_contours(LEFT_PIT_POS)
-	_setup_terrain_contours(RIGHT_PIT_POS)
-
 	_restock_pyramids()
-
-## Four plain (invisible) StaticBody3D panels ringing the table's edge —
-## nothing sits between the funnels and the table's own boundary (20x20,
-## see TABLE_SIZE), so a hard throw or a big bounce off the big slope can
-## otherwise send a hotdog sailing off the edge and falling forever, which
-## reads as "lost the hotdog" rather than a bounce. These use the same
-## tuned _environment_material as the rest of the terrain so they actually
-## bounce hotdogs back toward play instead of just deadstopping them.
-func _setup_table_walls() -> void:
-	var walls := StaticBody3D.new()
-	walls.name = "TableWalls"
-	walls.collision_layer = 0
-	walls.set_collision_layer_value(LAYER_TABLE, true)
-	walls.physics_material_override = _environment_material
-
-	var half_x := TABLE_SIZE.x * 0.5
-	var half_z := TABLE_SIZE.z * 0.5
-	var wall_thickness := 0.6
-	# Tall enough to catch anything thrown with real force (release velocity
-	# is tunable up to 8x peak hand speed) while staying well below the head,
-	# which sits well above the table — see HEAD_POS.
-	var wall_height := 6.0
-	var wall_center_y := TABLE_TOP_Y + wall_height * 0.5
-
-	var panels := [
-		[Vector3(0, wall_center_y, half_z + wall_thickness * 0.5), Vector3(TABLE_SIZE.x + wall_thickness * 2.0, wall_height, wall_thickness)],
-		[Vector3(0, wall_center_y, -half_z - wall_thickness * 0.5), Vector3(TABLE_SIZE.x + wall_thickness * 2.0, wall_height, wall_thickness)],
-		[Vector3(half_x + wall_thickness * 0.5, wall_center_y, 0), Vector3(wall_thickness, wall_height, TABLE_SIZE.z + wall_thickness * 2.0)],
-		[Vector3(-half_x - wall_thickness * 0.5, wall_center_y, 0), Vector3(wall_thickness, wall_height, TABLE_SIZE.z + wall_thickness * 2.0)],
-	]
-	for panel in panels:
-		var coll := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = panel[1]
-		coll.shape = box
-		coll.position = panel[0]
-		walls.add_child(coll)
-
-	add_child(walls)
 
 ## Builds one capsule-chain hotdog (see HOTDOG_SEGMENTS etc.) centered at the
 ## given world position, with each segment tagged with its chain index so
@@ -1131,356 +1003,47 @@ func _make_hotdog_chain(center: Vector3) -> int:
 	return hotdog_id
 
 ## Lays out PYRAMID_TOTAL hotdog chains in a 4-3-2-1 stacked pyramid (rows
-## spreading along Z, layers stacking up in Y) on the flat floor of the given
-## pit — spawned directly in their resting arrangement rather than dropped
-## from height, so nothing overlaps at spawn and the pyramid settles gently.
-func _spawn_pyramid(pit_pos: Vector3) -> void:
+## spreading along Z, layers stacking up in Y) on the flat table, centered at
+## the given point — spawned directly in their resting arrangement rather
+## than dropped from height, so nothing overlaps at spawn and the pyramid
+## settles gently.
+func _spawn_pyramid(center: Vector3) -> void:
 	var pitch_z := HOTDOG_SEGMENT_RADIUS * 2.0 * 1.05
 	var pitch_y := HOTDOG_SEGMENT_RADIUS * 2.0 * 0.87
-	var base_y := pit_pos.y - PIT_DEPTH + 0.03 + HOTDOG_SEGMENT_RADIUS
+	var base_y := center.y + 0.03 + HOTDOG_SEGMENT_RADIUS
 	for row in range(PYRAMID_ROWS.size()):
 		var count: int = PYRAMID_ROWS[row]
 		for i in range(count):
 			var z := (float(i) - float(count - 1) * 0.5) * pitch_z
 			var y := base_y + row * pitch_y
-			_make_hotdog_chain(Vector3(pit_pos.x, y, pit_pos.z + z))
+			_make_hotdog_chain(Vector3(center.x, y, center.z + z))
 
 func _restock_pyramids() -> void:
-	_spawn_pyramid(LEFT_PIT_POS)
-	_spawn_pyramid(RIGHT_PIT_POS)
-	_hotdogs_remaining = PYRAMID_TOTAL * 2
+	_spawn_pyramid(PYRAMID_CENTER)
+	_hotdogs_remaining = PYRAMID_TOTAL
 
-## Builds one funnel-shaped dip: a sloped ring (DIP_OUTER_RADIUS, at the main
-## table's height) down to a small flat pit (PIT_RADIUS, PIT_DEPTH lower) —
-## overlaid directly on top of the flat table rather than actually cutting a
-## hole in it, so a hotdog rolling near the pit meets the sloped surface
-## first and never reaches the flat table underneath at that spot.
-func _make_funnel_pit(pit_pos: Vector3) -> void:
-	var container := Node3D.new()
-	container.position = pit_pos
-	add_child(container)
-
-	var segments := 16
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for i in range(segments):
-		var a1 := (float(i) / segments) * TAU
-		var a2 := (float(i + 1) / segments) * TAU
-		var outer1 := Vector3(cos(a1) * DIP_OUTER_RADIUS, 0.0, sin(a1) * DIP_OUTER_RADIUS)
-		var outer2 := Vector3(cos(a2) * DIP_OUTER_RADIUS, 0.0, sin(a2) * DIP_OUTER_RADIUS)
-		var inner1 := Vector3(cos(a1) * PIT_RADIUS, -PIT_DEPTH, sin(a1) * PIT_RADIUS)
-		var inner2 := Vector3(cos(a2) * PIT_RADIUS, -PIT_DEPTH, sin(a2) * PIT_RADIUS)
-		for tri in [[outer2, outer1, inner1], [inner2, outer2, inner1]]:
-			for v in tri:
-				st.add_vertex(v)
-	st.generate_normals()
-
-	var funnel_body := StaticBody3D.new()
-	funnel_body.name = "FunnelWall"
-	# collision_layer defaults to layer 1 already set — clear it first so
-	# this body ends up on exactly LAYER_TABLE, not layer 1 AND LAYER_TABLE.
-	funnel_body.collision_layer = 0
-	funnel_body.set_collision_layer_value(LAYER_TABLE, true)
-	funnel_body.physics_material_override = _environment_material
-
-	var mesh_inst := MeshInstance3D.new()
-	mesh_inst.mesh = st.commit()
-	mesh_inst.material_override = _frosted_material(Color(0.42, 0.29, 0.18))
-	funnel_body.add_child(mesh_inst)
-
-	# Collision is built from simple tilted BoxShape3D panels, NOT a
-	# ConcavePolygonShape3D matching the visual mesh above — confirmed via
-	# isolated diagnostic that a hand-built concave/trimesh shape here
-	# provides no collision response at all under Jolt (a ball dropped onto
-	# it free-fell straight through, reproduced at two different scales),
-	# while the exact same slope built from primitive boxes works
-	# correctly and a dropped ball visibly rolls toward the center as
-	# intended. Visual mesh and collision proxy simply differ here, same as
-	# the hotdog's cosmetic bun is meant to (per the original design doc).
-	for i in range(segments):
-		var mid := (float(i) + 0.5) / segments * TAU
-		var outer_pt := Vector3(cos(mid) * DIP_OUTER_RADIUS, 0.0, sin(mid) * DIP_OUTER_RADIUS)
-		var inner_pt := Vector3(cos(mid) * PIT_RADIUS, -PIT_DEPTH, sin(mid) * PIT_RADIUS)
-		var panel_center := (outer_pt + inner_pt) * 0.5
-		var radial_dir := (inner_pt - outer_pt).normalized()
-		var tangent_dir := Vector3(-sin(mid), 0, cos(mid))
-		var normal_dir := radial_dir.cross(tangent_dir).normalized()
-		var panel_basis := Basis(tangent_dir, normal_dir, radial_dir)
-		var panel_length := (inner_pt - outer_pt).length()
-		var panel_width := (DIP_OUTER_RADIUS + PIT_RADIUS) * 0.5 * (TAU / segments) * 1.15
-
-		var coll := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(panel_width, 0.03, panel_length)
-		coll.shape = box
-		coll.transform = Transform3D(panel_basis, panel_center)
-		funnel_body.add_child(coll)
-	container.add_child(funnel_body)
-
-	var pit_floor := StaticBody3D.new()
-	pit_floor.name = "PitFloor"
-	pit_floor.collision_layer = 0
-	pit_floor.set_collision_layer_value(LAYER_TABLE, true)
-	pit_floor.physics_material_override = _environment_material
-	pit_floor.position = Vector3(0, -PIT_DEPTH, 0)
-
-	var floor_mesh_inst := MeshInstance3D.new()
-	var floor_cyl := CylinderMesh.new()
-	floor_cyl.top_radius = PIT_RADIUS
-	floor_cyl.bottom_radius = PIT_RADIUS
-	floor_cyl.height = 0.06
-	floor_mesh_inst.mesh = floor_cyl
-	floor_mesh_inst.material_override = _frosted_material(Color(0.32, 0.22, 0.14))
-	pit_floor.add_child(floor_mesh_inst)
-
-	var floor_coll := CollisionShape3D.new()
-	var floor_shape := CylinderShape3D.new()
-	floor_shape.radius = PIT_RADIUS
-	floor_shape.height = 0.06
-	floor_coll.shape = floor_shape
-	pit_floor.add_child(floor_coll)
-	container.add_child(pit_floor)
-
-## Same radial-slope technique as _make_funnel_pit, extended out to
-## LARGE_SLOPE_RADIUS so the whole table drains toward the pits, not just
-## their immediate rims. Panels are clipped to global x on the same side as
-## this pit — since the two pits are mirrored across x=0, that split IS the
-## nearest-pit boundary, so the two basins drain into their own pit instead
-## of overlapping and fighting each other. Meets the small funnel exactly
-## at DIP_OUTER_RADIUS (same local height convention: 0 at that radius),
-## so the two slopes join up continuously.
-## Radius, along a given angle from this pit's own center, at which the
-## cone would cross the seam (the vertical plane exactly between the two
-## pits) — clamped to stay within [DIP_OUTER_RADIUS, LARGE_SLOPE_RADIUS] and
-## nudged slightly past the exact crossing (SEAM_MARGIN) so neighboring
-## panels' trimmed edges still touch with a hairline of overlap rather than
-## risking a gap. Angles pointing away from the seam (or exactly along it)
-## never cross, so they keep the full radius — this is what makes each
-## pit's cone stop at the dividing line instead of extending across into
-## the other cone and blocking sightlines through it.
-func _slope_outer_radius(pit_offset_x: float, angle: float) -> float:
-	const SEAM_MARGIN := 0.15
-	var c := cos(angle)
-	if c * pit_offset_x >= 0.0:
-		return LARGE_SLOPE_RADIUS
-	var r_cross := absf(pit_offset_x) / absf(c) + SEAM_MARGIN
-	return clampf(r_cross, DIP_OUTER_RADIUS, LARGE_SLOPE_RADIUS)
-
-func _make_big_slope(pit_pos: Vector3) -> void:
-	var container := Node3D.new()
-	container.position = pit_pos
-	add_child(container)
-
-	var segments := 40
-	var seam_x := (LEFT_PIT_POS.x + RIGHT_PIT_POS.x) * 0.5
-	var pit_offset_x := pit_pos.x - seam_x
-
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var slope_body := StaticBody3D.new()
-	slope_body.name = "BigSlope"
-	slope_body.collision_layer = 0
-	slope_body.set_collision_layer_value(LAYER_TABLE, true)
-	slope_body.physics_material_override = _environment_material
-
-	for i in range(segments):
-		var mid := (float(i) + 0.5) / segments * TAU
-		var a1 := (float(i) / segments) * TAU
-		var a2 := (float(i + 1) / segments) * TAU
-		var outer_r_mid := _slope_outer_radius(pit_offset_x, mid)
-		var outer_r1 := _slope_outer_radius(pit_offset_x, a1)
-		var outer_r2 := _slope_outer_radius(pit_offset_x, a2)
-
-		# The small funnel's own outer rim (DIP_OUTER_RADIUS) sits at LOCAL
-		# height 0 (unmodified table height) — so for the two slopes to
-		# connect continuously, THIS slope's inner edge must also be 0,
-		# meaning its outer (far) edge has to be ELEVATED above baseline
-		# and descend down TO baseline, not the reverse. Height at the
-		# (possibly seam-trimmed) outer radius comes from the same shared
-		# formula the contour rings use, so a trimmed panel's outer edge
-		# still lands at the correct height for wherever it was cut off.
-		var outer_pt := Vector3(cos(mid) * outer_r_mid, _terrain_height_at_radius(outer_r_mid), sin(mid) * outer_r_mid)
-		var inner_pt := Vector3(cos(mid) * DIP_OUTER_RADIUS, 0.0, sin(mid) * DIP_OUTER_RADIUS)
-		var outer1 := Vector3(cos(a1) * outer_r1, _terrain_height_at_radius(outer_r1), sin(a1) * outer_r1)
-		var outer2 := Vector3(cos(a2) * outer_r2, _terrain_height_at_radius(outer_r2), sin(a2) * outer_r2)
-		var inner1 := Vector3(cos(a1) * DIP_OUTER_RADIUS, 0.0, sin(a1) * DIP_OUTER_RADIUS)
-		var inner2 := Vector3(cos(a2) * DIP_OUTER_RADIUS, 0.0, sin(a2) * DIP_OUTER_RADIUS)
-		for tri in [[inner2, inner1, outer1], [outer2, inner2, outer1]]:
-			for v in tri:
-				st.add_vertex(v)
-
-		var panel_center := (outer_pt + inner_pt) * 0.5
-		var radial_dir := (inner_pt - outer_pt).normalized()
-		var tangent_dir := Vector3(-sin(mid), 0, cos(mid))
-		var normal_dir := radial_dir.cross(tangent_dir).normalized()
-		var panel_basis := Basis(tangent_dir, normal_dir, radial_dir)
-		var panel_length := (inner_pt - outer_pt).length()
-		var panel_width := (outer_r_mid + DIP_OUTER_RADIUS) * 0.5 * (TAU / segments) * 1.15
-
-		var coll := CollisionShape3D.new()
-		var box := BoxShape3D.new()
-		box.size = Vector3(panel_width, 0.03, panel_length)
-		coll.shape = box
-		coll.transform = Transform3D(panel_basis, panel_center)
-		slope_body.add_child(coll)
-
-	st.generate_normals()
-	var mesh_inst := MeshInstance3D.new()
-	mesh_inst.mesh = st.commit()
-	mesh_inst.material_override = _frosted_material(Color(0.48, 0.33, 0.2))
-	slope_body.add_child(mesh_inst)
-	container.add_child(slope_body)
-
-## Local height (relative to a pit's own origin) at a given radius from its
-## center — the exact same three-zone formula _make_funnel_pit and
-## _make_big_slope build geometry from, kept in one place so the contour
-## rings drawn below can never drift out of sync with the actual terrain.
-func _terrain_height_at_radius(radius: float) -> float:
-	if radius <= PIT_RADIUS:
-		return -PIT_DEPTH
-	if radius <= DIP_OUTER_RADIUS:
-		return lerpf(-PIT_DEPTH, 0.0, (radius - PIT_RADIUS) / (DIP_OUTER_RADIUS - PIT_RADIUS))
-	if radius <= LARGE_SLOPE_RADIUS:
-		return lerpf(0.0, LARGE_SLOPE_DEPTH, (radius - DIP_OUTER_RADIUS) / (LARGE_SLOPE_RADIUS - DIP_OUTER_RADIUS))
-	return LARGE_SLOPE_DEPTH
-
-## World-space terrain surface height at an arbitrary (x, z) — whichever
-## pit is nearer governs, matching how the slopes themselves are split.
-## Anything placed procedurally (initial hotdog spawn, resets, etc.) should
-## use this rather than assuming the old flat TABLE_TOP_Y: spawning below
-## the actual (now often-elevated) surface means starting inside solid
-## slope geometry, which the physics engine resolves by shoving the body
-## out — plausibly the real cause of the reported "hotdog rolls off
-## screen", not just the slope being too steep.
-func _terrain_world_height_at(world_x: float, world_z: float) -> float:
-	var dist_left := Vector2(world_x - LEFT_PIT_POS.x, world_z - LEFT_PIT_POS.z).length()
-	var dist_right := Vector2(world_x - RIGHT_PIT_POS.x, world_z - RIGHT_PIT_POS.z).length()
-	return TABLE_TOP_Y + _terrain_height_at_radius(minf(dist_left, dist_right))
-
-## True while `body` is currently touching a table/funnel/slope/ground
-## surface (any body tagged LAYER_TABLE or LAYER_GROUND) — requires
-## contact_monitor + max_contacts_reported already set on `body` (true for
-## hotdog segments and, now, arm segments too). Used to keep the funnel pull
-## from grabbing hotdogs/arms mid-air (a held or just-thrown hotdog, or an
-## arm reaching through the funnel's airspace) — it should only nudge things
-## actually resting on a surface toward the pit center.
-func _is_touching_table_surface(body: RigidBody3D) -> bool:
-	for other in body.get_colliding_bodies():
-		# NOT "other is CollisionObject3D" — confirmed via diagnostic that
-		# the flat table (a CSGBox3D) reports itself in get_colliding_bodies()
-		# same as any StaticBody3D would, but CSGShape3D doesn't actually
-		# extend CollisionObject3D, so that check silently excluded it and
-		# left anything resting on the flat table reading as "not touching"
-		# forever. CSGShape3D still exposes get_collision_layer_value
-		# natively (it's how the table's own layer got set up in the first
-		# place), so duck-typing on the method is enough.
-		if other.has_method("get_collision_layer_value") and (other.get_collision_layer_value(LAYER_TABLE) or other.get_collision_layer_value(LAYER_GROUND)):
-			return true
-	return false
-
-## Nudges anything within a funnel's outer radius toward that pit's exact
-## XZ center — see _funnel_center_pull_strength for why this exists on top
-## of the slope/floor geometry. Horizontal only (no Y component), so it
-## never fights gravity or lifts anything; within the funnel, "toward
-## center" and "downhill" are the same direction anyway, since terrain
-## height there is purely a function of radius. Only applies to bodies
-## actually resting on the table/funnel surface (see
-## _is_touching_table_surface) — otherwise a thrown or held hotdog passing
-## over a funnel mid-air, or an arm merely reaching over one, would get
-## yanked sideways with no contact to justify it.
-##
-## Also handles the opposite extreme: anything that landed beyond
-## LARGE_SLOPE_RADIUS, past where the terrain has any slope at all, gets a
-## fixed (non-spring) nudge toward whichever pit is nearer — see
-## _long_range_return_strength.
-func _apply_funnel_center_pull(body: RigidBody3D) -> void:
-	if not _is_touching_table_surface(body):
-		return
-	var nearest_pit := LEFT_PIT_POS
-	if body.global_position.distance_squared_to(RIGHT_PIT_POS) < body.global_position.distance_squared_to(LEFT_PIT_POS):
-		nearest_pit = RIGHT_PIT_POS
-	var offset := Vector3(body.global_position.x - nearest_pit.x, 0.0, body.global_position.z - nearest_pit.z)
-	var dist := offset.length()
-	if dist < DIP_OUTER_RADIUS:
-		body.apply_central_force(-offset * _funnel_center_pull_strength)
-	else:
-		# Used to only fire past LARGE_SLOPE_RADIUS, relying on the terrain's
-		# own slope for everything in between — confirmed via diagnostic
-		# that a hotdog can rest indefinitely on the big slope's own seam
-		# area (where the two pits' cones meet and get angularly trimmed —
-		# see _slope_outer_radius) well inside that radius, with a near-zero
-		# residual velocity and nothing correcting it. This "everywhere
-		# outside the close spring zone" nudge closes that gap too, not
-		# just the fully-flat area beyond the slope.
-		body.apply_central_force(-offset.normalized() * _long_range_return_strength)
-
-# Anything genuinely on the table never gets anywhere near this low —
-# confirmed via diagnostic that the two funnel slopes' seam (where each
-# pit's cone gets angularly trimmed so the two don't overlap — see
-# _slope_outer_radius) has a real gap somewhere along it: an object pulled
-# straight down that line (roughly equidistant from both pits, e.g. by
-# _long_range_return_strength above) can tunnel through into permanent
-# freefall instead of landing on either slope. Rather than re-deriving that
-# seam mesh (real risk of trading one edge case for another), anything that
-# falls this far below the table gets teleported back — a standard
-# "fell through the floor" safety net, and strictly better than a hotdog
-# just vanishing into the void forever.
-const FALLEN_KILL_Y := -5.0
-
-## True if `body` is resting on the under-table "Ground" plinth (LAYER_GROUND,
-## see _setup_ground) — a second, much more common tunneling case found via
-## diagnostic: a hotdog pulled through the SMALL funnel's own collision (a
-## separate set of tilted panels from the big slope's, see _make_funnel_pit)
-## can slip through it too, but rather than free-falling forever it lands on
-## this plinth sitting below the whole table and just stops there — stable,
-## so it would never trip the FALLEN_KILL_Y check above, but just as
-## unreachable/invisible as actually falling through. Legitimate hotdog rest
-## surfaces are all LAYER_TABLE; LAYER_GROUND is never one of them, so
-## touching it at all is itself the signal to rescue, regardless of height.
-func _is_touching_ground_plinth(body: RigidBody3D) -> bool:
-	for other in body.get_colliding_bodies():
-		if other.has_method("get_collision_layer_value") and other.get_collision_layer_value(LAYER_GROUND):
-			return true
-	return false
-
-## Teleports a WHOLE hotdog chain back above whichever pit it was nearest to
-## when it fell through — moved by one shared rigid delta (same trick
-## _grab_hotdog uses) so the chain's own permanent inter-segment joints
-## don't get stressed by only one segment jumping.
-func _rescue_hotdog_chain_if_fallen(chain: Array) -> void:
+## A hotdog knocked off the table's edge is despawned and replaced rather
+## than chased/pulled back — there's no funnel/wall to catch it in this flat-
+## table version (see _setup_table_and_pyramids), so "well below the table"
+## unambiguously means lost. Same cleanup _score_hotdog already does for a
+## scored chain, plus a fresh one spawned back at the pile — doesn't touch
+## _hotdogs_remaining/_score, since this isn't a scoring event.
+func _respawn_hotdog_chain_if_lost(chain_index: int) -> void:
+	var chain: Array = _hotdog_chains[chain_index]
 	if chain.is_empty():
 		return
 	var lead: RigidBody3D = chain[0]
-	if not is_instance_valid(lead):
+	if not is_instance_valid(lead) or lead.global_position.y > TABLE_TOP_Y - 0.5:
 		return
-	if lead.global_position.y >= FALLEN_KILL_Y and not _is_touching_ground_plinth(lead):
-		return
-	var nearest_pit := LEFT_PIT_POS
-	if lead.global_position.distance_squared_to(RIGHT_PIT_POS) < lead.global_position.distance_squared_to(LEFT_PIT_POS):
-		nearest_pit = RIGHT_PIT_POS
-	var safe_pos := nearest_pit + Vector3(0, 1.0, 0)
-	var delta := Transform3D(Basis.IDENTITY, safe_pos - lead.global_position)
+	for joint in _hotdog_chain_joints[chain_index]:
+		if is_instance_valid(joint):
+			joint.queue_free()
 	for seg in chain:
 		if is_instance_valid(seg):
-			seg.global_transform = delta * seg.global_transform
-			seg.linear_velocity = Vector3.ZERO
-			seg.angular_velocity = Vector3.ZERO
-
-## Topographic contour rings (like a map's elevation lines) at fixed radius
-## steps around a pit, each drawn flat at its own actual terrain height —
-## a temporary read-the-terrain aid while shaping the slopes, toggled by
-## F1 along with the other debug visualizations.
-func _setup_terrain_contours(pit_pos: Vector3) -> void:
-	var step := 0.5
-	var radius := step
-	while radius < LARGE_SLOPE_RADIUS:
-		var ring := _make_wire_mesh(func(st: SurfaceTool) -> void:
-			_add_wire_circle(st, radius, 48, Vector3.RIGHT, Vector3.FORWARD)
-		)
-		ring.position = pit_pos + Vector3(0, _terrain_height_at_radius(radius), 0)
-		add_child(ring)
-		_debug_nodes.append(ring)
-		radius += step
+			seg.queue_free()
+	_hotdog_chains[chain_index] = []
+	_hotdog_chain_joints[chain_index] = []
+	_make_hotdog_chain(PYRAMID_CENTER + Vector3(0, 0.1, 0))
 
 func _on_grab_area_body_entered(body: Node, arm: ArmState) -> void:
 	if arm.held_segment != null:
@@ -1569,7 +1132,7 @@ func _release_held_hotdog(arm: ArmState) -> void:
 ## (not per-segment) so a whole pyramid settling at once can't turn into a
 ## machine-gun of beeps.
 func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
-	if body == _head_visual:
+	if body == _head_collision_body:
 		var away := segment.global_position - HEAD_POS
 		if away.length() > 0.001:
 			var normal := away.normalized()
@@ -1611,17 +1174,14 @@ func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
 # is exactly what makes "show only this one arm chain" possible from a
 # single full-body skinned mesh without any actual mesh editing.
 
+## A skin is always active — no "no skin" state to cycle through anymore
+## (see _ready) — so this just wraps around the two entries in SKIN_DEFS.
 func _cycle_skin() -> void:
-	_apply_skin((_current_skin_index + 1) % (SKIN_DEFS.size() + 1))
+	_apply_skin((_current_skin_index % SKIN_DEFS.size()) + 1)
 
 func _apply_skin(index: int) -> void:
 	_teardown_skin()
 	_current_skin_index = index
-
-	if index == 0:
-		_set_primitives_visible(true)
-		_skin_label.text = "Skin: None (F2 to cycle)"
-		return
 
 	var def: Dictionary = SKIN_DEFS[index - 1]
 	_set_primitives_visible(false)
@@ -1639,6 +1199,7 @@ func _teardown_skin() -> void:
 			arm.skin_bone_idx = {}
 			arm.skin_rest_dirs = {}
 			arm.skin_scale = 1.0
+	_head_collision_body = null
 	if _head_skin_root:
 		_head_skin_root.queue_free()
 		_head_skin_root = null
@@ -1648,7 +1209,6 @@ func _set_primitives_visible(is_visible: bool) -> void:
 		arm.upper_arm.get_node("Mesh").visible = is_visible
 		arm.forearm.get_node("Mesh").visible = is_visible
 		arm.hand.get_node("Mesh").visible = is_visible
-	_head_visual.visible = is_visible
 
 func _find_skeleton(node: Node) -> Skeleton3D:
 	if node is Skeleton3D:
@@ -1737,7 +1297,10 @@ func _setup_arm_skin(arm: ArmState, def: Dictionary, bones: Dictionary) -> void:
 func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	var head_idx := source_skeleton.find_bone(def["head_bone"])
 	var head_rest := _bone_global_rest(source_skeleton, head_idx)
-	var head_scale := float(def["head_scale"])
+	# Same scale as the arms — "one avatar instance" means head, body, and
+	# arms are all one consistently-scaled character, not an independently
+	# oversized head (see SKIN_DEFS).
+	var head_scale := float(def["scale"])
 
 	var source_mesh_inst := _find_mesh_instance(source_skeleton)
 	var bbox := _measure_bone_weighted_aabb(source_mesh_inst.mesh, head_idx)
@@ -1759,6 +1322,21 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	add_child(static_inst)
 	_head_skin_root = static_inst
 
+	# Head collision — the old giant CSG placeholder head is gone (a skin is
+	# always shown now), so hotdogs need something right-sized to bounce off
+	# for the "goal" mechanic (see _on_hotdog_segment_body_entered). Same
+	# convex-hull-on-LAYER_FACE treatment as the body below.
+	var head_static := StaticBody3D.new()
+	head_static.name = "SkinHeadCollision"
+	head_static.collision_layer = 0
+	head_static.set_collision_layer_value(LAYER_FACE, true)
+	head_static.physics_material_override = _environment_material
+	var head_coll := CollisionShape3D.new()
+	head_coll.shape = head_mesh.create_convex_shape(true, false)
+	head_static.add_child(head_coll)
+	static_inst.add_child(head_static)
+	_head_collision_body = head_static
+
 	_setup_body_skin(def, source_skeleton, source_mesh_inst.mesh, head_idx, static_inst)
 
 	if bbox.size != Vector3.ZERO:
@@ -1774,11 +1352,10 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 ## instead of a separately-resized statue bolted on underneath (freeing
 ## _head_skin_root in _teardown_skin cleans this up too, no separate
 ## tracking var needed). Also builds a matching STATIC collision hull (a
-## convex hull, not a concave trimesh — see _make_funnel_pit's own comment
-## on why a hand-built concave shape gave zero collision response under
-## Jolt) on LAYER_FACE, the same layer the head itself collides on, so
-## hotdogs/arms already masked for that layer bounce off it with no extra
-## collision-mask setup.
+## convex hull, not a concave trimesh — a hand-built concave shape gave zero
+## collision response under Jolt in earlier testing) on LAYER_FACE, the same
+## layer the head itself collides on, so hotdogs/arms already masked for
+## that layer bounce off it with no extra collision-mask setup.
 func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh: Mesh, head_idx: int, head_mesh_inst: MeshInstance3D) -> void:
 	var excluded_bones := [head_idx]
 	for side_bones in [def["left_arm_bones"], def["right_arm_bones"]]:
@@ -2092,8 +1669,8 @@ func _physics_process(delta: float) -> void:
 				# _pre_collision_velocity for why the signal itself can't be
 				# trusted for this.
 				_pre_collision_velocity[seg] = seg.linear_velocity
-				_apply_funnel_center_pull(seg)
-		_rescue_hotdog_chain_if_fallen(chain)
+	for i in range(_hotdog_chains.size()):
+		_respawn_hotdog_chain_if_lost(i)
 
 	_process_arm(_arm_left, delta)
 	_process_arm(_arm_right, delta)
@@ -2136,10 +1713,6 @@ func _process_arm(arm: ArmState, delta: float) -> void:
 	var error := arm.target_pos - arm.hand.global_position
 	var force := error * _hand_spring_stiffness - arm.hand.linear_velocity * _hand_spring_damping
 	arm.hand.apply_central_force(force)
-
-	_apply_funnel_center_pull(arm.upper_arm)
-	_apply_funnel_center_pull(arm.forearm)
-	_apply_funnel_center_pull(arm.hand)
 
 	_update_arm_skin_pose(arm)
 	_record_hand_velocity(arm)
