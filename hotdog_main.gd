@@ -131,7 +131,7 @@ const PYRAMID_ROWS := [4, 3, 2, 1]
 const PYRAMID_TOTAL := 10
 
 # Stage 5: no timer — untimed until this many points, then a scene transition.
-const WIN_SCORE := 10
+const WIN_SCORE := 5
 
 # Placeholder beeps, per the doc ("basic sound cues... placeholder beeps are
 # fine initially") — synthesized procedurally so the project doesn't need
@@ -377,7 +377,11 @@ class ArmState:
 var _arm_left: ArmState
 var _arm_right: ArmState
 
-var _head_visual: Node3D
+## The skin head's own collision StaticBody3D (see _setup_head_skin) — no
+## more base/placeholder head (a skin is always shown now, see _ready), so
+## this is what _on_hotdog_segment_body_entered's head-bounce check
+## compares against.
+var _head_collision_body: StaticBody3D = null
 
 var _arm_material: PhysicsMaterial
 var _hotdog_material: PhysicsMaterial
@@ -422,7 +426,6 @@ func _ready() -> void:
 	_setup_environment()
 	_setup_lighting()
 	_setup_ground()
-	_setup_head()
 	_setup_mouth_trigger()
 	_arm_left = _setup_arm(SHOULDER_POS, "left_arm_")
 	_arm_right = _setup_arm(RIGHT_SHOULDER_POS, "right_arm_")
@@ -432,7 +435,13 @@ func _ready() -> void:
 	_setup_controls_ui()
 	_setup_score_ui()
 	_setup_skin_ui()
-	_setup_tuning_ui()
+	# Hidden for now, per feedback — the live-tuning panel is still fully
+	# wired up (_setup_tuning_ui, _add_slider), just not shown; uncomment to
+	# bring it back.
+	# _setup_tuning_ui()
+	# Always show an avatar — no more base/placeholder head (see
+	# _cycle_skin/_apply_skin).
+	_apply_skin(1)
 
 func _setup_materials() -> void:
 	# Starting values kept low — bounce compounds with the active hand
@@ -547,29 +556,6 @@ func _setup_ground() -> void:
 	ground.add_child(coll)
 
 	add_child(ground)
-
-func _setup_head() -> void:
-	var head := CSGCombiner3D.new()
-	head.name = "Head"
-	head.use_collision = true
-	head.set_collision_layer_value(LAYER_FACE, true)
-	head.position = HEAD_POS
-
-	var skull := CSGSphere3D.new()
-	skull.radius = HEAD_RADIUS
-	skull.material = _material(Color(0.95, 0.8, 0.65))
-	head.add_child(skull)
-
-	var mouth := CSGCylinder3D.new()
-	mouth.operation = CSGShape3D.OPERATION_SUBTRACTION
-	mouth.radius = MOUTH_RADIUS
-	mouth.height = HEAD_RADIUS * 2.2
-	mouth.rotation_degrees.x = 90.0
-	mouth.position = Vector3(0, MOUTH_Y_OFFSET, 0)
-	head.add_child(mouth)
-
-	add_child(head)
-	_head_visual = head
 
 func _setup_mouth_trigger() -> void:
 	var trigger := Area3D.new()
@@ -1585,7 +1571,7 @@ func _release_held_hotdog(arm: ArmState) -> void:
 ## (not per-segment) so a whole pyramid settling at once can't turn into a
 ## machine-gun of beeps.
 func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
-	if body == _head_visual:
+	if body == _head_collision_body:
 		var away := segment.global_position - HEAD_POS
 		if away.length() > 0.001:
 			var normal := away.normalized()
@@ -1627,17 +1613,15 @@ func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
 # is exactly what makes "show only this one arm chain" possible from a
 # single full-body skinned mesh without any actual mesh editing.
 
+## A skin is always active — no base/placeholder head to cycle through
+## anymore (see _ready) — so this just wraps around the two entries in
+## SKIN_DEFS.
 func _cycle_skin() -> void:
-	_apply_skin((_current_skin_index + 1) % (SKIN_DEFS.size() + 1))
+	_apply_skin((_current_skin_index % SKIN_DEFS.size()) + 1)
 
 func _apply_skin(index: int) -> void:
 	_teardown_skin()
 	_current_skin_index = index
-
-	if index == 0:
-		_set_primitives_visible(true)
-		_skin_label.text = "Skin: None (F2 to cycle)"
-		return
 
 	var def: Dictionary = SKIN_DEFS[index - 1]
 	_set_primitives_visible(false)
@@ -1655,6 +1639,7 @@ func _teardown_skin() -> void:
 			arm.skin_bone_idx = {}
 			arm.skin_rest_dirs = {}
 			arm.skin_scale = 1.0
+	_head_collision_body = null
 	if _head_skin_root:
 		_head_skin_root.queue_free()
 		_head_skin_root = null
@@ -1664,7 +1649,6 @@ func _set_primitives_visible(is_visible: bool) -> void:
 		arm.upper_arm.get_node("Mesh").visible = is_visible
 		arm.forearm.get_node("Mesh").visible = is_visible
 		arm.hand.get_node("Mesh").visible = is_visible
-	_head_visual.visible = is_visible
 
 func _find_skeleton(node: Node) -> Skeleton3D:
 	if node is Skeleton3D:
@@ -1774,6 +1758,21 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	static_inst.transform = Transform3D(scaled_basis, HEAD_POS - scaled_basis * anchor_local)
 	add_child(static_inst)
 	_head_skin_root = static_inst
+
+	# Head collision — no more base/placeholder head (a skin is always
+	# shown now), so hotdogs need something right-sized to bounce off for
+	# the "goal" mechanic (see _on_hotdog_segment_body_entered). Same
+	# convex-hull-on-LAYER_FACE treatment as the body below.
+	var head_static := StaticBody3D.new()
+	head_static.name = "SkinHeadCollision"
+	head_static.collision_layer = 0
+	head_static.set_collision_layer_value(LAYER_FACE, true)
+	head_static.physics_material_override = _environment_material
+	var head_coll := CollisionShape3D.new()
+	head_coll.shape = head_mesh.create_convex_shape(true, false)
+	head_static.add_child(head_coll)
+	static_inst.add_child(head_static)
+	_head_collision_body = head_static
 
 	_setup_body_skin(def, source_skeleton, source_mesh_inst.mesh, head_idx, static_inst)
 
