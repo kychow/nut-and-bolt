@@ -113,6 +113,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey) or event.is_echo():
 		return
 
+	# Block running before instructions dismissed (main.gd flag-gate, keeps BGM playing)
+	var parent := get_parent()
+	if parent != null and parent.has_method("is_game_started") and not parent.is_game_started():
+		return
+
 	if event.is_action_pressed("ui_left") or event.keycode == KEY_A:
 		_process_step(-1)
 	elif event.is_action_pressed("ui_right") or event.keycode == KEY_D:

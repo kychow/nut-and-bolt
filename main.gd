@@ -17,6 +17,7 @@ extends Node3D
 var _player: Player
 
 var _has_finished := false
+var _has_started := false
 
 var _elapsed_time := 0.0
 var _hud_canvas_layer = null
@@ -25,6 +26,7 @@ var _win_label = null
 var _restart_label = null
 
 var _bgm_player: AudioStreamPlayer
+var _instructions_layer: CanvasLayer = null
 
 
 func _ready() -> void:
@@ -36,6 +38,10 @@ func _ready() -> void:
 
 	_create_hud()
 	_setup_bgm()
+	_create_instructions()
+
+func is_game_started() -> bool:
+	return _has_started
 
 
 # ============================================================
@@ -472,6 +478,141 @@ func _create_hud() -> void:
 	_win_label = win_label
 	_restart_label = restart_label
 
+func _create_instructions() -> void:
+	# Show every run; simplest visual consistent with title_screen palette
+	_instructions_layer = CanvasLayer.new()
+	_instructions_layer.name = "InstructionsLayer"
+	_instructions_layer.layer = 10
+	add_child(_instructions_layer)
+
+	var dim := ColorRect.new()
+	dim.name = "Dim"
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_instructions_layer.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.name = "Center"
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	_instructions_layer.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.name = "Panel"
+	# StyleBoxFlat for rounded panel
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.12, 0.12, 0.18, 0.82)
+	sb.border_color = Color.WHITE
+	sb.set_border_width_all(2)
+	sb.set_corner_radius_all(16)
+	sb.content_margin_left = 28
+	sb.content_margin_right = 28
+	sb.content_margin_top = 24
+	sb.content_margin_bottom = 24
+	panel.add_theme_stylebox_override("panel", sb)
+	center.add_child(panel)
+
+	var vbox := VBoxContainer.new()
+	vbox.name = "VBox"
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 18)
+	panel.add_child(vbox)
+
+	var title := Label.new()
+	title.name = "Title"
+	title.text = "HOW TO RUN"
+	title.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 40)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	title.add_theme_constant_override("outline_size", 6)
+	title.add_theme_color_override("font_outline_color", Color(0.12, 0.12, 0.18))
+	vbox.add_child(title)
+
+	var keys := HBoxContainer.new()
+	keys.name = "Keys"
+	keys.alignment = BoxContainer.ALIGNMENT_CENTER
+	keys.add_theme_constant_override("separation", 12)
+	vbox.add_child(keys)
+
+	for key_name in ["A", "D"]:
+		var badge := Label.new()
+		badge.name = "Key" + key_name
+		badge.text = key_name
+		badge.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+		badge.add_theme_font_size_override("font_size", 28)
+		badge.add_theme_color_override("font_color", Color(0.12, 0.12, 0.18))
+		badge.custom_minimum_size = Vector2(56, 56)
+		var bsb := StyleBoxFlat.new()
+		bsb.bg_color = Color.WHITE
+		bsb.set_corner_radius_all(10)
+		badge.add_theme_stylebox_override("normal", bsb)
+		keys.add_child(badge)
+
+	var arrow := Label.new()
+	arrow.name = "Arrow"
+	arrow.text = "↔ Alternate rapidly"
+	arrow.add_theme_font_size_override("font_size", 20)
+	arrow.add_theme_color_override("font_color", Color.WHITE)
+	keys.add_child(arrow)
+
+	var body := Label.new()
+	body.name = "Body"
+	body.text = "Tap A then D, then A… Keep alternating to build speed.\nMashing one key won't move you. Race to the white finish line!"
+	body.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	body.add_theme_font_size_override("font_size", 18)
+	body.add_theme_color_override("font_color", Color.WHITE)
+	body.autowrap_mode = TextServer.AUTOWRAP_WORD
+	body.custom_minimum_size = Vector2(420, 0)
+	vbox.add_child(body)
+
+	var hint := Label.new()
+	hint.name = "Hint"
+	hint.text = "Press SPACE (or A / D) to start"
+	hint.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	hint.add_theme_font_size_override("font_size", 16)
+	hint.add_theme_color_override("font_color", Color(1, 1, 1, 0.85))
+	vbox.add_child(hint)
+
+	# Subtle flash on hint (like title_screen flash)
+	var tween := create_tween()
+	tween.set_loops()
+	tween.tween_property(hint, "modulate:a", 0.3, 0.8)
+	tween.tween_property(hint, "modulate:a", 1.0, 0.8)
+
+func _dismiss_instructions() -> void:
+	if _has_started:
+		return
+	_has_started = true
+	if _instructions_layer == null:
+		return
+	var layer := _instructions_layer
+	_instructions_layer = null
+	# CanvasLayer has no modulate; tween its Center child
+	var target: Control = layer.get_node_or_null("Center") as Control
+	if target == null:
+		target = layer.get_node_or_null("Dim") as Control
+	if target != null:
+		var tween := create_tween()
+		tween.tween_property(target, "modulate:a", 0.0, 0.25)
+		tween.tween_callback(layer.queue_free)
+	else:
+		layer.queue_free()
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _has_started or _has_finished:
+		return
+	# Dismiss on SPACE, A, D, or mouse click (recommended)
+	var should_dismiss := false
+	if event is InputEventKey and event.pressed and not event.is_echo():
+		if event.keycode == KEY_SPACE or event.keycode == KEY_A or event.keycode == KEY_D:
+			should_dismiss = true
+	elif event is InputEventMouseButton and event.pressed:
+		should_dismiss = true
+	elif event is InputEventJoypadButton and event.pressed:
+		should_dismiss = true
+	if should_dismiss:
+		_dismiss_instructions()
+		get_viewport().set_input_as_handled()
+
 
 func _process(delta: float) -> void:
 	if _has_finished:
@@ -480,6 +621,9 @@ func _process(delta: float) -> void:
 			_restart_label.visible = true
 		if Input.is_key_pressed(KEY_R):
 			get_tree().reload_current_scene()
+		return
+
+	if not _has_started:
 		return
 
 	_elapsed_time += delta
