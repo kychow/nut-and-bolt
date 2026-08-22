@@ -606,6 +606,17 @@ func _on_mouth_trigger_body_entered(body: Node) -> void:
 	# rather than letting the player just push a held hotdog into the mouth.
 	if hotdog_id == _arm_left.held_hotdog_id or hotdog_id == _arm_right.held_hotdog_id:
 		return
+	# A hotdog is a multi-segment chain (HOTDOG_SEGMENTS capsules, all
+	# tagged with this same hotdog_id) — more than one segment can end up
+	# inside the trigger volume close together in time (or in the same
+	# tick), each independently firing this same signal. Without this
+	# guard, that scores the SAME hotdog multiple times — confirmed as the
+	# cause of an intermittent double (sometimes triple) score, depending
+	# on the chain's exact speed/orientation passing through the mouth.
+	# Checking the chain array directly (rather than a separate flag)
+	# reuses the exact "already scored" state _score_hotdog leaves behind.
+	if _hotdog_chains[hotdog_id].is_empty():
+		return
 	_score_hotdog(hotdog_id)
 
 func _score_hotdog(hotdog_id: int) -> void:
