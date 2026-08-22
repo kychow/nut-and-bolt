@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://dqkbr7byprmk5"
+path="res://.godot/imported/Super_Mario_Level_Loop_02 cropped for title.wav-be80ba56c5b3e654cbc9a4f2744da0ee.sample"
+
+[deps]
+
+source_file="res://audio/BGM/Super_Mario_Level_Loop_02 cropped for title.wav"
+dest_files=["res://.godot/imported/Super_Mario_Level_Loop_02 cropped for title.wav-be80ba56c5b3e654cbc9a4f2744da0ee.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2

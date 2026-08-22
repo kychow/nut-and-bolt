@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://dxkw7xl67dqrd"
+path="res://.godot/imported/Super_Mario_Level_Loop_FULL_SONG_MusicGPT.mp3-4d5b7e391430483ea323e664a64d9b12.mp3str"
+
+[deps]
+
+source_file="res://audio/Raw audio files/Super_Mario_Level_Loop_FULL_SONG_MusicGPT.mp3"
+dest_files=["res://.godot/imported/Super_Mario_Level_Loop_FULL_SONG_MusicGPT.mp3-4d5b7e391430483ea323e664a64d9b12.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
