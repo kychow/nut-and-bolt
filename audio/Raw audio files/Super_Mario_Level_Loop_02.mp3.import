@@ -1,0 +1,19 @@
+[remap]
+
+importer="mp3"
+type="AudioStreamMP3"
+uid="uid://cxw4rkifehyyh"
+path="res://.godot/imported/Super_Mario_Level_Loop_02.mp3-2b057e2cb5f63b51c2a3764b5efc2d3a.mp3str"
+
+[deps]
+
+source_file="res://audio/Raw audio files/Super_Mario_Level_Loop_02.mp3"
+dest_files=["res://.godot/imported/Super_Mario_Level_Loop_02.mp3-2b057e2cb5f63b51c2a3764b5efc2d3a.mp3str"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4
