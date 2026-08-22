@@ -163,7 +163,10 @@ const HAND_CLOSED_COLOR := Color(0.85, 0.5, 0.35)
 const SKIN_DEFS := [
 	{
 		"name": "Jamaican Sprinter",
-		"glb_path": "res://skins/jamaican-sprinter-rigged.glb",
+		# De-duplicated against the sprinter game's own copy of this asset
+		# (byte-identical — confirmed via checksum before removing the
+		# hotdog-local copy when the two projects merged into one).
+		"glb_path": "res://assets/jamaican-sprinter-rigged.glb",
 		"left_arm_bones": {"upper": "upperarm_R", "fore": "forearm_R", "hand": "hand_R"},
 		"right_arm_bones": {"upper": "upperarm_L", "fore": "forearm_L", "hand": "hand_L"},
 		"head_bone": "head",
@@ -172,7 +175,9 @@ const SKIN_DEFS := [
 	},
 	{
 		"name": "Joey Chestnut",
-		"glb_path": "res://skins/joey-chestnut-nathans-rigged.glb",
+		# De-duplicated against the sprinter project's own top-level copy
+		# (byte-identical) when the two projects merged into one.
+		"glb_path": "res://joey-chestnut-nathans-rigged.glb",
 		# This rig's own convention is "L"/"R" with no underscore
 		# (upperarmL, not upperarm_L) — confirmed via the same headless
 		# bone-inspection approach used for the sprinter rig. Same

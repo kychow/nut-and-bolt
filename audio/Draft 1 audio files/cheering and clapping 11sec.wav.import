@@ -1,0 +1,24 @@
+[remap]
+
+importer="wav"
+type="AudioStreamWAV"
+uid="uid://caoq5a1xrllnu"
+path="res://.godot/imported/cheering and clapping 11sec.wav-0b49b2e17407c833b3d5878d4da0c9c6.sample"
+
+[deps]
+
+source_file="res://audio/Draft 1 audio files/cheering and clapping 11sec.wav"
+dest_files=["res://.godot/imported/cheering and clapping 11sec.wav-0b49b2e17407c833b3d5878d4da0c9c6.sample"]
+
+[params]
+
+force/8_bit=false
+force/mono=false
+force/max_rate=false
+force/max_rate_hz=44100
+edit/trim=false
+edit/normalize=false
+edit/loop_mode=0
+edit/loop_begin=0
+edit/loop_end=-1
+compress/mode=2

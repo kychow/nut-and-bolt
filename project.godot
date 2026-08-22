@@ -15,15 +15,31 @@ run/main_scene="res://title_screen.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 config/icon="res://icon.svg"
 
+[autoload]
+
+McpInteractionServer="*res://scripts/mcp_interaction_server.gd"
+
 [display]
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
 
+[layer_names]
+
+3d_physics/layer_1="arm"
+3d_physics/layer_2="hand"
+3d_physics/layer_3="hotdog"
+3d_physics/layer_4="table"
+3d_physics/layer_5="ground"
+3d_physics/layer_6="face"
+
 [physics]
 
+common/physics_ticks_per_second=120
 3d/physics_engine="Jolt Physics"
 
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
