@@ -17,11 +17,12 @@ extends Node3D
 var _player: Player
 
 var _has_finished := false
-var _win_screen_shown := false
 
 var _elapsed_time := 0.0
 var _hud_canvas_layer = null
 var _timer_label = null
+var _win_label = null
+var _restart_label = null
 
 var _bgm_player: AudioStreamPlayer
 
@@ -432,72 +433,51 @@ func _create_hud() -> void:
 	canvas_layer.name = "HUD"
 	add_child(canvas_layer)
 
-	var label := Label.new()
-	label.name = "TimerLabel"
-	#label.position = Vector2(0, -50)
-	label.size = Vector2(200, 50)
-	label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	label.vertical_alignment = VerticalAlignment.VERTICAL_ALIGNMENT_CENTER
-	label.add_theme_font_size_override("font_size", 36)
-	label.text = "Time: %02.1fs" % _elapsed_time
+	var vbox := VBoxContainer.new()
+	vbox.name = "HUDVBox"
+	vbox.anchor_left = 0.0
+	vbox.anchor_right = 1.0
+	vbox.anchor_top = 0.0
+	vbox.anchor_bottom = 0.0
+	vbox.offset_top = 24.0
+	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
+	vbox.add_theme_constant_override("separation", 8)
+	canvas_layer.add_child(vbox)
 
-	canvas_layer.add_child(label)
+	var timer_label := Label.new()
+	timer_label.name = "TimerLabel"
+	timer_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	timer_label.add_theme_font_size_override("font_size", 36)
+	timer_label.text = "Time: %02.1fs" % _elapsed_time
+	vbox.add_child(timer_label)
+
+	var win_label := Label.new()
+	win_label.name = "WinLabel"
+	win_label.text = "YOU WIN!"
+	win_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	win_label.add_theme_font_size_override("font_size", 48)
+	win_label.visible = false
+	vbox.add_child(win_label)
+
+	var restart_label := Label.new()
+	restart_label.name = "RestartLabel"
+	restart_label.text = "Press R to restart"
+	restart_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	restart_label.add_theme_font_size_override("font_size", 24)
+	restart_label.visible = false
+	vbox.add_child(restart_label)
 
 	_hud_canvas_layer = canvas_layer
-	_timer_label = label
-
-
-func _create_win_screen() -> void:
-	_win_screen_shown = true
-
-	# Dark overlay background.
-	var overlay := ColorRect.new()
-	overlay.name = "WinOverlay"
-	overlay.color = Color(0.0, 0.0, 0.0, 0.7)
-	overlay.anchors_preset = Control.PRESET_FULL_RECT
-	_hud_canvas_layer.add_child(overlay)
-
-	# Center container for all win text.
-	var center := CenterContainer.new()
-	center.name = "WinCenter"
-	center.anchors_preset = Control.PRESET_FULL_RECT
-	_hud_canvas_layer.add_child(center)
-
-	var vbox := VBoxContainer.new()
-	vbox.name = "WinVBox"
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 20)
-	center.add_child(vbox)
-
-	# Title.
-	var title := Label.new()
-	title.name = "WinTitle"
-	title.text = "YOU WIN!"
-	title.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 64)
-	vbox.add_child(title)
-
-	# Final time.
-	var time_label := Label.new()
-	time_label.name = "WinTime"
-	time_label.text = "Time: %02.1fs" % _elapsed_time
-	time_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	time_label.add_theme_font_size_override("font_size", 48)
-	vbox.add_child(time_label)
-
-	# Restart instruction.
-	var instruction := Label.new()
-	instruction.name = "WinInstruction"
-	instruction.text = "Press R to restart"
-	instruction.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	instruction.add_theme_font_size_override("font_size", 28)
-	vbox.add_child(instruction)
+	_timer_label = timer_label
+	_win_label = win_label
+	_restart_label = restart_label
 
 
 func _process(delta: float) -> void:
 	if _has_finished:
-		if not _win_screen_shown:
-			_create_win_screen()
+		if _win_label != null and not _win_label.visible:
+			_win_label.visible = true
+			_restart_label.visible = true
 		if Input.is_key_pressed(KEY_R):
 			get_tree().reload_current_scene()
 		return
