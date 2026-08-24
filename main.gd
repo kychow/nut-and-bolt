@@ -620,7 +620,7 @@ func _process(delta: float) -> void:
 			_win_label.visible = true
 			_restart_label.visible = true
 		if Input.is_key_pressed(KEY_R):
-			get_tree().reload_current_scene()
+			get_tree().change_scene_to_file("res://hotdog_main.tscn")
 		return
 
 	if not _has_started:

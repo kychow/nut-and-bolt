@@ -1,6 +1,6 @@
 extends CanvasLayer
 
-const GAME_SCENE := "res://main.tscn"
+const GAME_SCENE := "res://hotdog_main.tscn"
 const FADE_DURATION := 0.4
 
 @onready var _root: Control = $Root
