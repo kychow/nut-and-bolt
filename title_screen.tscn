@@ -1,7 +1,7 @@
 [gd_scene format=4 uid="uid://c7r2oaxq4vmht"]
 
 [ext_resource type="Script" uid="uid://r2h8k0cm2ca8" path="res://title_screen.gd" id="1_title"]
-[ext_resource type="Script" uid="uid://c1xqg8ie1ygqj" path="res://backdrop.gd" id="2_backdrop"]
+[ext_resource type="Script" uid="uid://c1xqg8ie1ygqj" path="res://scenes/backdrop.gd" id="2_backdrop"]
 [ext_resource type="Script" uid="uid://di7vswcd016hn" path="res://audio_stream_player.gd" id="3_ig5kc"]
 
 [sub_resource type="Animation" id="Animation_flash"]
