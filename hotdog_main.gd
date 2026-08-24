@@ -131,7 +131,7 @@ const PYRAMID_ROWS := [4, 3, 2, 1]
 const PYRAMID_TOTAL := 10
 
 # Stage 5: no timer — untimed until this many points, then a scene transition.
-const WIN_SCORE := 5
+const WIN_SCORE := 1
 
 # Placeholder beeps, per the doc ("basic sound cues... placeholder beeps are
 # fine initially") — synthesized procedurally so the project doesn't need
@@ -659,7 +659,7 @@ func _on_win() -> void:
 	# on the next physics tick (confirmed via diagnostic: "apply force
 	# without a physics space" errors immediately after the winning score).
 	_game_won = true
-	get_tree().change_scene_to_file("res://scenes/next_level.tscn")
+	get_tree().change_scene_to_file("res://scenes/win.tscn")
 
 func _setup_camera() -> void:
 	var camera := Camera3D.new()

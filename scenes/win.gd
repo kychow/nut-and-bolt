@@ -1,8 +1,6 @@
 extends Node2D
 
-## Placeholder win screen — the real next-stage content isn't designed yet;
-## this is just a clean, swappable landing point for the _on_win() scene
-## transition in main.gd.
+var _dismissed := false
 
 func _ready() -> void:
 	var layer := CanvasLayer.new()
@@ -13,7 +11,7 @@ func _ready() -> void:
 	layer.add_child(bg)
 
 	var label := Label.new()
-	label.text = "You win!\nNext stage coming soon"
+	label.text = "You win!\nPress Enter to continue"
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_size_override("font_size", 40)
@@ -24,3 +22,10 @@ func _ready() -> void:
 	layer.add_child(label)
 
 	add_child(layer)
+
+func _unhandled_input(event: InputEvent) -> void:
+	if _dismissed:
+		return
+	if event is InputEventKey and event.pressed and not event.is_echo() and event.keycode == KEY_ENTER:
+		_dismissed = true
+		get_tree().change_scene_to_file("res://main.tscn")
