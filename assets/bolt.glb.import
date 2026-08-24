@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dvw8yghvy1vhr"
-path="res://.godot/imported/joey-chestnut-nathans-rigged.glb-723928f4a353f86ce5317926b83a2b89.scn"
+uid="uid://dt358808ic7js"
+path="res://.godot/imported/bolt.glb-3ce33ecdd6da47d54441b3b09233446b.scn"
 
 [deps]
 
-source_file="res://assets/joey-chestnut-nathans-rigged.glb"
-dest_files=["res://.godot/imported/joey-chestnut-nathans-rigged.glb-723928f4a353f86ce5317926b83a2b89.scn"]
+source_file="res://assets/bolt.glb"
+dest_files=["res://.godot/imported/bolt.glb-3ce33ecdd6da47d54441b3b09233446b.scn"]
 
 [params]
 

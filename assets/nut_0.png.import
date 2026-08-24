@@ -2,8 +2,8 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://dysi8bia7sd2n"
-path.s3tc="res://.godot/imported/joey-chestnut-nathans-rigged_0.png-aa1711426c6e7e57fd6b7d9478383f83.s3tc.ctex"
+uid="uid://brqboa4dr8gbx"
+path.s3tc="res://.godot/imported/nut_0.png-37a407bd0ddd3e4c255428fd75aafb40.s3tc.ctex"
 metadata={
 "imported_formats": ["s3tc_bptc"],
 "vram_texture": true
@@ -14,8 +14,8 @@ generator_parameters={
 
 [deps]
 
-source_file="res://assets/joey-chestnut-nathans-rigged_0.png"
-dest_files=["res://.godot/imported/joey-chestnut-nathans-rigged_0.png-aa1711426c6e7e57fd6b7d9478383f83.s3tc.ctex"]
+source_file="res://assets/nut_0.png"
+dest_files=["res://.godot/imported/nut_0.png-37a407bd0ddd3e4c255428fd75aafb40.s3tc.ctex"]
 
 [params]
 

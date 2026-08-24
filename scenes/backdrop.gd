@@ -1,3 +1,4 @@
+
 extends Control
 
 const SKY := Color(0.60, 0.72, 0.85)

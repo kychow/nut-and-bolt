@@ -63,9 +63,9 @@ func _ready() -> void:
 	_setup_footsteps()
 
 func _load_character() -> void:
-	var glb_scene := load("res://assets/jamaican-sprinter-rigged.glb")
+	var glb_scene := load("res://assets/nut.glb")
 	if glb_scene == null:
-		push_error("Player: Could not load res://assets/jamaican-sprinter-rigged.glb")
+		push_error("Player: Could not load res://assets/nut.glb")
 		return
 
 	character = glb_scene.instantiate() as Node3D

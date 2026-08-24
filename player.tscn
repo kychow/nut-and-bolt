@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://c08pbwj2lgc6u"]
 
-[ext_resource type="PackedScene" uid="uid://dtwb6uxx4a8d4" path="res://assets/jamaican-sprinter-rigged.glb" id="1_4flbx"]
+[ext_resource type="PackedScene" uid="uid://dt358808ic7js" path="res://assets/bolt.glb" id="1_4flbx"]
 
 [node name="bolt" unique_id=1449194651 instance=ExtResource("1_4flbx")]
 

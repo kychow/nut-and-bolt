@@ -3,13 +3,13 @@
 importer="scene"
 importer_version=1
 type="PackedScene"
-uid="uid://dt358808ic7js"
-path="res://.godot/imported/jamaican-sprinter-rigged.glb-bae77cf8c2ab2f6319455cc1aaf7bd65.scn"
+uid="uid://cissu5dv0bvst"
+path="res://.godot/imported/nut.glb-0b9ffac46c158820b9ac8c14c9108847.scn"
 
 [deps]
 
-source_file="res://assets/jamaican-sprinter-rigged.glb"
-dest_files=["res://.godot/imported/jamaican-sprinter-rigged.glb-bae77cf8c2ab2f6319455cc1aaf7bd65.scn"]
+source_file="res://assets/nut.glb"
+dest_files=["res://.godot/imported/nut.glb-0b9ffac46c158820b9ac8c14c9108847.scn"]
 
 [params]
 
