@@ -14,7 +14,7 @@ extends Node3D
 @export_group("Movement Mechanics")
 @export var max_speed := 10.0
 @export var push_force := 2.5
-@export var speed_decay := 3.5
+@export var speed_decay := 7.0
 @export var max_hold_time := 0.15
 @export var hold_penalty_mult := 8.0
 
@@ -51,6 +51,7 @@ var current_speed := 0.0
 var active_leg := 0 # -1 = Left (A), 1 = Right (D)
 var key_hold_timer := 0.0
 var animation_phase := 0.0 # Stride cycle (0.0 to PI)
+var time_since_last_input := 10.0
 
 # Audio
 var footstep_player: AudioStreamPlayer
@@ -153,6 +154,9 @@ func _process_step(leg: int) -> void:
 		key_hold_timer = 0.0
 		animation_phase = 0.0
 		current_speed = min(current_speed + push_force, max_speed)
+		time_since_last_input = 0.0
+		forward_lean_angle = 0.25
+		body_bounce_height = 0.08
 		_play_footstep()
 
 func _physics_process(delta: float) -> void:
@@ -162,13 +166,21 @@ func _physics_process(delta: float) -> void:
 	var d_held := Input.is_key_pressed(KEY_D)
 
 	current_speed = max(0.0, current_speed - speed_decay * delta)
+	time_since_last_input += delta
+
+	var actively_inputting := time_since_last_input < max_hold_time
 
 	# Movement & Stride Progress
-	if current_speed > 0.01:
+	if current_speed > 0.01 and actively_inputting:
 		animation_phase = min(animation_phase + delta * (current_speed * 1.5), PI)
 		position += transform.basis * Vector3(0, 0, -current_speed * delta)
-	else:
-		animation_phase = lerp(animation_phase, 0.0, delta * 10.0)
+
+	# Blend back to neutral when idle
+	if not actively_inputting:
+		var decay_weight := 1.0 - exp(-12.0 * delta)
+		animation_phase = lerp(animation_phase, 0.0, decay_weight)
+		forward_lean_angle = lerp(forward_lean_angle, 0.0, decay_weight)
+		body_bounce_height = lerp(body_bounce_height, 0.0, decay_weight)
 
 	_animate_character(delta)
 
