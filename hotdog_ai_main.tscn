@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cisov6syfqh27"]
+
+[ext_resource type="Script" uid="uid://b32c37iil37n6" path="res://hotdog_ai_main.gd" id="1"]
+
+[node name="Main" type="Node3D" unique_id=1603361395]
+script = ExtResource("1")
