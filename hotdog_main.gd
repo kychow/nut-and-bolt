@@ -1,16 +1,5 @@
 extends Node3D
 
-# --- Stage 1: static head + one physics-driven ragdoll arm ---
-# --- Stage 2: hand grab/release on a single hotdog prop ---
-# --- Stage 3: mouth scoring trigger ---
-#
-# Camera faces the character from the front (character facing +Z, toward the
-# camera). Screen-left/right is therefore the OPPOSITE of the arm's own
-# anatomical left/right, since the character mirrors the viewer. Input below
-# is deliberately written directly in world/screen X (not the arm's own
-# anatomical frame) so "A" always drags the target toward screen-left — this
-# is the mirroring the design calls for, just implemented without an
-# intermediate anatomical-frame step.
 
 const LAYER_ARM := 1
 const LAYER_HAND := 2
@@ -22,37 +11,14 @@ const LAYER_FACE := 6
 const HEAD_RADIUS := 1.05 * 1.5
 const MOUTH_RADIUS := 0.225 * 1.5 * 2.0
 
-# How far past the front opening a hotdog's center must travel before it
-# counts as a score — placing the trigger volume itself this deep (rather
-# than right at the rim, or tracking depth-traveled over time) means simply
-# entering the trigger already implies clearing this depth, so a low-speed
-# graze along the mouth's edge can't register.
 const MOUTH_SCORE_DEPTH := MOUTH_RADIUS * 1.5
 
-# Vertical placement of the mouth within the head: a fraction of the way up
-# the head's own diameter, measured from the bottom — 0.25 instead of the
-# geometric center (0.5), which is what actually reads as a mouth rather
-# than an eye/nose-height hole. Expressed as a local Y offset FROM THE
-# HEAD'S CENTER (negative = below center) so both the placeholder CSG
-# mouth and the mouth-scoring trigger can share the exact same formula.
 const MOUTH_HEIGHT_FRACTION := 0.25
 const MOUTH_Y_OFFSET := (MOUTH_HEIGHT_FRACTION - 0.5) * 2.0 * HEAD_RADIUS
 
-# Mouth radius as a fraction of the head's own radius — kept as an explicit
-# ratio (not just the two raw constants) so a skin's mouth hole (see
-# SKIN_DEFS / _apply_head_mouth_hole) can reproduce the exact same
-# proportions on a completely different head mesh, measured from ITS OWN
-# head size rather than this game's HEAD_RADIUS.
 const MOUTH_RADIUS_RATIO := MOUTH_RADIUS / HEAD_RADIUS
 
-# Shoulder moved out from its original -0.3 by one original head length
-# (2 * the pre-scale-up 0.35 head radius = 0.7), i.e. further from the head,
-# then an additional 1/3 of the (now scaled-up) head radius further out
-# still, so the shoulder clears the head with a visible gap instead of
-# sitting inside its now much larger radius.
 const SHOULDER_POS := Vector3(-1.0 - HEAD_RADIUS / 3.0, 1.4, 0.05)
-# Second arm is a straight mirror of the first across x=0, matching the
-# already-mirrored LEFT_PIT_POS/RIGHT_PIT_POS pair below.
 const RIGHT_SHOULDER_POS := Vector3(-SHOULDER_POS.x, SHOULDER_POS.y, SHOULDER_POS.z)
 const UPPER_ARM_LEN := 0.35
 const FOREARM_LEN := 0.32
@@ -65,63 +31,23 @@ const MAX_REACH := UPPER_ARM_LEN + FOREARM_LEN
 const GRAB_RADIUS := 0.08
 
 const TABLE_TOP_Y := 1.05
-# Big floor now, not a small platform — footprint far bigger than the play
-# area the camera actually frames, reading as effectively infinite.
 const TABLE_SIZE := Vector3(20, TABLE_TOP_Y, 20)
 const TABLE_POS := Vector3(0, TABLE_TOP_Y * 0.5, 0)
 
-# Two funnel-shaped dips sloping down into small pits, one on each side next
-# to where a hand naturally works — mirrored left/right of center so a
-# missed or knocked-off hotdog rolls toward whichever hand is closer. Only
-# the left arm exists so far, but the right pit is built now too, ready for
-# the second arm (stage 4).
 const PIT_RADIUS := 0.35
 const PIT_DEPTH := 0.24
 const DIP_OUTER_RADIUS := 0.9
 const LEFT_PIT_POS := Vector3(SHOULDER_POS.x, TABLE_TOP_Y, 0.45)
 const RIGHT_PIT_POS := Vector3(-SHOULDER_POS.x, TABLE_TOP_Y, 0.45)
 
-# Beyond the small funnel (which handles the final approach into the pit
-# itself), the WHOLE table now slants toward whichever pit is nearest, out
-# to this much bigger radius — so a hotdog placed or tossed anywhere on the
-# reachable table eventually rolls all the way in, not just near the rim.
-# Depth is picked for a ~23 degree slope: comfortably above the ~15 degree
-# angle of repose given the hotdog/table friction values (below that angle,
-# friction alone can hold an object in place indefinitely regardless of how
-# long the slope is — confirmed this matters via the small funnel needing a
-# steeper re-tune earlier to actually reach the pit rather than stall
-# partway), but NOT much more than that — a first pass at ~4 units of total
-# relief sent a hotdog spawned near the middle rolling off-screen with far
-# more speed than intended. Split at global x=0 (the midline between the
-# two mirrored pits) so the two basins drain into their own pit rather than
-# fighting each other in the overlap.
 const LARGE_SLOPE_RADIUS := 6.0
 const LARGE_SLOPE_DEPTH := 2.2
 
-# Head center originally cleared the tabletop by a full head length (2 *
-# HEAD_RADIUS) of gap plus the head's own radius; shifted down by one more
-# head length (diameter, 2*HEAD_RADIUS) from that, per feedback that the
-# head sat too high, then back up by half a head length (HEAD_RADIUS) once
-# that turned out to sit too low (the skin head's own proportions extend
-# further below center than the primitive sphere, overlapping the
-# terrain) — net gap above the tabletop is now 2 * HEAD_RADIUS.
-#
-# Z is pushed back so the head's own FRONT surface (its +Z-facing edge,
-# HEAD_RADIUS in front of center) lands exactly at the back edge of the
-# small funnel (DIP_OUTER_RADIUS out from the pit center, on the -Z side) —
-# the funnel itself, not the much bigger outer slope, since that's the
-# part actually within arm's reach. Keeps the head from visually
-# overlapping the depth range the arms actually work in.
 const HEAD_POS := Vector3(0, TABLE_TOP_Y + HEAD_RADIUS + HEAD_RADIUS, LEFT_PIT_POS.z - DIP_OUTER_RADIUS - HEAD_RADIUS)
 
 const HOTDOG_RADIUS := 0.045
 const HOTDOG_LEN := 0.22
 
-# Stage 4: each hotdog is a short chain of capsule segments on soft-limited
-# joints (a rope-like ragdoll), not one rigid capsule — so it visibly bends
-# when thrown or bounced, per the design doc. Segment radius matches the old
-# single-capsule HOTDOG_RADIUS; segment length is chosen so the whole chain's
-# length still lands close to the old HOTDOG_LEN.
 const HOTDOG_SEGMENTS := 3
 const HOTDOG_SEGMENT_RADIUS := 0.045
 const HOTDOG_SEGMENT_LEN := 0.07
@@ -130,218 +56,56 @@ const HOTDOG_JOINT_LIMIT_DEG := 22.0
 const PYRAMID_ROWS := [4, 3, 2, 1]
 const PYRAMID_TOTAL := 10
 
-# Stage 5: no timer — untimed until this many points, then a scene transition.
 const WIN_SCORE := 1
 
-# Placeholder beeps, per the doc ("basic sound cues... placeholder beeps are
-# fine initially") — synthesized procedurally so the project doesn't need
-# any external audio assets, distinguished only by pitch/length per cue.
 const BOUNCE_SOUND_COOLDOWN_MS := 150
 const BOUNCE_SOUND_MIN_SPEED := 0.6
 
 const HAND_OPEN_COLOR := Color(0.95, 0.75, 0.6)
 const HAND_CLOSED_COLOR := Color(0.85, 0.5, 0.35)
 
-# Optional cosmetic "skins" — a rigged .glb overlaid on the invisible
-# physics scaffolding (capsules stay the actual simulated bodies; the skin
-# is purely visual, driven by posing its skeleton's bones each tick to
-# match the physics arm segments). Index 0 in the cycle is always "no skin"
-# (the default primitives); SKIN_DEFS holds everything past that.
-#
-# Bone mapping is per-skin since naming conventions vary between rigs.
-# Screen-left ("left_arm_bones") is this game's own screen-space left,
-# which is the CHARACTER's anatomical right (see the file header comment on
-# camera mirroring) — for a rig using the same "_L"/"_R" suffix convention
-# as this one, that means screen-left maps to the rig's "_R" bones.
-#
-# "scale" maps the source rig's own rest-pose arm reach (shoulder to wrist)
-# onto this game's MAX_REACH, so the skin's arm roughly matches how far the
-# physics hand can actually travel — computed here from the jamaican-
-# sprinter rig's own measured rest bone lengths (upperarm_L: 0.28,
-# forearm_L: 0.22, confirmed via a headless bone-inspection script before
-# writing this), not a guess.
 const SKIN_DEFS := [
 	{
 		"name": "Jamaican Sprinter",
-		# De-duplicated against the sprinter game's own copy of this asset
-		# (byte-identical — confirmed via checksum before removing the
-		# hotdog-local copy when the two projects merged into one).
 		"glb_path": "res://assets/bolt.glb",
 		"left_arm_bones": {"upper": "upperarm_R", "fore": "forearm_R", "hand": "hand_R"},
 		"right_arm_bones": {"upper": "upperarm_L", "fore": "forearm_L", "hand": "hand_L"},
 		"head_bone": "head",
 		"hide_root_bone": "hips",
 		"scale": MAX_REACH / (0.28 + 0.22),
-		# The head gets its OWN, much larger scale (applied only to the
-		# head skin instance, not the arms) — matched to this game's
-		# deliberately oversized cartoon head rather than the arm-reach
-		# scale above, which would otherwise leave a realistically-tiny
-		# head floating next to arm-scaled proportions. 0.22 is the source
-		# rig's own head size (a near-cube, measured via a headless
-		# vertex-bounds inspection of the vertices weighted to the "head"
-		# bone: local AABB size (0.21, 0.23, 0.22)), so this maps that
-		# measured size onto this game's head diameter (2 * HEAD_RADIUS).
 		"head_scale": (2.0 * HEAD_RADIUS) / 0.22,
 	},
 	{
 		"name": "Joey Chestnut",
-		# De-duplicated against the sprinter project's own top-level copy
-		# (byte-identical) when the two projects merged into one.
 		"glb_path": "res://assets/nut.glb",
-		# This rig's own convention is "L"/"R" with no underscore
-		# (upperarmL, not upperarm_L) — confirmed via the same headless
-		# bone-inspection approach used for the sprinter rig. Same
-		# screen-left/anatomical-right mirroring as that rig too.
 		"left_arm_bones": {"upper": "upperarmR", "fore": "lowerarmR", "hand": "handR"},
 		"right_arm_bones": {"upper": "upperarmL", "fore": "lowerarmL", "hand": "handL"},
 		"head_bone": "head",
 		"hide_root_bone": "hips",
-		# Measured rest bone lengths (upperarmL: 0.30, lowerarmL: 0.26) via
-		# the same headless bone-inspection approach as the sprinter rig
-		# above.
 		"scale": MAX_REACH / (0.30 + 0.26),
-		# Measured local AABB of vertices weighted to the "head" bone:
-		# (0.281, 0.302, 0.300) — close enough to a cube that, same as the
-		# sprinter rig, one averaged dimension stands in for a single
-		# "head diameter".
 		"head_scale": (2.0 * HEAD_RADIUS) / 0.294,
 	},
 ]
 
-# Thruster-style target control — deliberately floaty by design; see the
-# arm-control section of the design doc for why this shouldn't be "fixed"
-# with heavier damping.
 const TARGET_DAMPING := 0.992
-
-# The following are tunable live from the on-screen slider panel (see
-# _setup_tuning_ui) — they're `var`s with these as just the starting values,
-# not `const`s, so player-side tuning doesn't require touching code at all.
 var _target_accel: float = 650.0
-
-# How many recent physics ticks of hand velocity a throw can draw its peak
-# from (see _release_held_hotdog) — confirmed via diagnostic that target
-# gravity + damping alone bleed hand speed from ~2.0 down to ~0.5 within
-# under half a second of releasing the movement key, well before a player
-# can realistically also reach the separate release key. 16 ticks (~0.27s
-# at the default 60Hz) covers a realistic reaction gap without letting a
-# throw be "pre-charged" and released long after — tunable rather than a
-# fixed guess, since the right amount of forgiveness here is a feel call.
 var _throw_velocity_samples: float = 16.0
-
-# Multiplies the peak velocity a throw uses at release — a hotdog released
-# "at 1 m/s" actually flies at 3x that, same direction. Makes throws feel
-# more forceful than the arm's own (deliberately floaty/weak) motion would
-# otherwise produce; tunable since the right amount of extra oomph is a
-# feel call, not a physical fact.
 var _release_velocity_multiplier: float = 3.0
-
-# A gentle horizontal spring pulling anything within a funnel's outer
-# radius (DIP_OUTER_RADIUS) toward that pit's exact XZ center — the slope
-# and flat pit floor alone reliably get a settling hotdog CLOSE to center
-# (confirmed via earlier diagnostic) but not necessarily to the exact
-# bottom, and a resting arm segment can find complex stuck configurations
-# on the slope that friction alone won't resolve (a multi-joint chain
-# draped across a curved surface, unlike a single hotdog capsule). This
-# force is scaled by distance from center like a real spring, so it's
-# naturally zero right at the target point rather than needing a deadzone,
-# and is gentle enough that a player actively driving the hand nearby
-# (spring stiffness ~48) isn't fighting it in any noticeable way.
 var _funnel_center_pull_strength: float = 3.0
-
-# The sloped terrain (_terrain_height_at_radius) only actually slopes out to
-# LARGE_SLOPE_RADIUS from a pit — past that it's a flat plateau with zero
-# gradient, so a hard/lucky throw that overshoots the slope entirely lands
-# somewhere with nothing at all pulling it back (confirmed: it just sits
-# exactly where it landed, often out of camera frame — reads as "the hotdog
-# disappeared"). This is a FIXED-magnitude nudge toward whichever pit is
-# nearer, not a spring like _funnel_center_pull_strength above — a
-# proportional force would be enormous at, say, 8 units out for a hotdog
-# segment's tiny mass. It only fires beyond LARGE_SLOPE_RADIUS (see
-# _apply_funnel_center_pull); once that nudges something back inside the
-# slope, the real sloped geometry and the close-range spring pull both take
-# over on their own. Needs to comfortably clear static friction to ever
-# start a resting hotdog moving at all (confirmed via diagnostic: 0.15
-# left it dead stopped indefinitely — friction against a hotdog segment's
-# tiny mass, ~0.05, absorbed it completely) rather than a true "gentle"
-# feel being achievable here.
 var _long_range_return_strength: float = 0.6
-
-# CSGShape3D (the head) has no physics_material_override slot (confirmed
-# earlier — setting it there is a hard error), so a hotdog hitting the
-# solid skull otherwise bounces with whatever Jolt's engine-default
-# restitution happens to be, which reads as "hitting a wall" rather than a
-# clear bounce. Scripted instead: on the FIRST contact tick with the head
-# (see _on_hotdog_segment_body_entered), reflect the segment's incoming
-# velocity across the local "away from head center" direction — a real
-# bounce, not just a shove — then scale it by this restitution. Since the
-# mouth is a genuine hole in the CSG collision (no contact fires there at
-# all), this only ever triggers on the solid parts of the skull, so a
-# trajectory aimed AT the mouth just sails through untouched, while one that
-# clips the rim gets redirected — sometimes off into space, sometimes
-# straight into the opening, exactly the "make it or bounce out" feel a
-# hoop-toss goal should have.
 var _head_bounce_restitution: float = 0.65
-
-# PD spring driving the hand toward the target. Damping is set to ~40% of
-# critical damping (2*sqrt(stiffness*mass)) for this stiffness/mass, which
-# is the "fluid but bouncy" regime (visible overshoot, a couple of settling
-# oscillations) rather than either robotically snapping (ratio ~1) or
-# wobbling forever (ratio <0.15). See godot_ragdoll_physics_reference.md.
 var _hand_spring_stiffness: float = 48.0
 var _hand_spring_damping: float = 3.5
 
-# The shoulder used to ALSO be a script-driven torque spring, independently
-# aiming the upper arm's pointing direction at the target — removed (see
-# reference_arm_physics_demo.html, which has no equivalent mechanism at
-# all: its upper-arm direction is a pure byproduct of where the hand ends
-# up, not something separately driven). With both the hand spring AND that
-# torque converging on the same target, the whole chain tended to
-# straighten out; now only the hand is actively driven, and the upper arm's
-# orientation comes purely from what the elbow/wrist joints transmit back
-# from that pull plus gravity — same free-hanging treatment as the elbow.
-# The wrist stays passive too (just its existing hard angular limit) — an
-# earlier attempt at an active wrist spring fought that limit badly enough
-# to peg the hand's angular velocity at an engine safety ceiling; not worth
-# chasing down further given how minor the wrist's motion range is.
-
-# Arm segments get a bit of extra gravity_scale on top of the engine default
-# so a released/undriven arm visibly sags — but not so much that the spring
-# above can no longer lift it (see _hand_spring_stiffness).
 var _arm_gravity_scale: float = 1.2
-
-# The shoulder and elbow both have genuinely zero angular limit, so this is
-# now the ONLY thing damping their spin at all (previously the shoulder's
-# own align-torque spring also corrected its pointing direction, though
-# never its roll). Lowered from 8.0 now that nothing else is damping the
-# shoulder — trying for more of the reference demo's visible overshoot/
-# wobble — but kept well above 0, since a truly undamped free shoulder
-# idled in a persistent low-level spin indefinitely rather than settling
-# (confirmed in earlier testing).
 var _arm_angular_damp: float = 4.0
-
-# Gravity on the CONTROL TARGET itself, not just the physical arm. Without
-# this, letting go of all keys leaves the target frozen at whatever height
-# it last had, and a spring strong enough to actually lift the arm (see
-# _hand_spring_stiffness) is then also strong enough to hold it there against
-# gravity almost perfectly — the arm would never fall when idle. This makes
-# the target itself sink when not being actively held up, same as the arm.
 var _target_gravity: float = 9.8
-
-# Vertical camera framing: ground at the bottom, up to one more head-radius
-# of clear headspace above the head's own top edge. Originally this was
-# purely table-height-derived (2x table height above the tabletop), but
-# that no longer tracks anything meaningful now that the head's size and
-# position are set independently of the table — re-anchored to the head
-# itself so it doesn't end up cropped out of frame.
 const CAMERA_FOV_DEG := 45.0
 const FRAME_BOTTOM_Y := 0.0
 const FRAME_TOP_Y := HEAD_POS.y + HEAD_RADIUS * 2.0
 
 var _rest_dir: Vector3 = Vector3(0, -0.15, 1).normalized()
 
-## All per-arm state, so the exact same construction/driving/reset code runs
-## for both arms instead of being duplicated — each instance owns one arm's
-## bodies, joints, control target, and input action names.
 class ArmState:
 	var shoulder_pos: Vector3
 	var input_prefix: String
@@ -359,15 +123,10 @@ class ArmState:
 	var target_pos: Vector3
 	var target_vel: Vector3 = Vector3.ZERO
 
-	# Rolling window of recent hand velocity, so a throw can use the PEAK
-	# speed from the last ~1/6 second rather than whatever the hand's
-	# velocity happens to be at the exact instant release is pressed — see
-	# _release_held_hotdog for why this matters.
 	var hand_velocity_history: Array[Vector3] = []
 
 	var rest_transforms: Dictionary = {}
 
-	# Skin (see SKIN_DEFS): null when no skin is active on this arm.
 	var skin_root: Node3D = null
 	var skin_skeleton: Skeleton3D = null
 	var skin_bone_idx: Dictionary = {}
@@ -383,18 +142,10 @@ var _arm_material: PhysicsMaterial
 var _hotdog_material: PhysicsMaterial
 var _environment_material: PhysicsMaterial
 
-# Hotdog pyramid bookkeeping: each chain is a small array of connected
-# capsule segments; a segment's index into _hotdog_chains is stashed in its
-# own metadata so grab/score handlers can find "which hotdog is this part
-# of" from just the RigidBody3D a signal handed them.
 var _hotdog_chains: Array = []
 var _hotdog_chain_joints: Array = []
 var _hotdogs_remaining: int = 0
 
-# Each hotdog segment's linear_velocity as of the START of the current
-# physics tick, before that tick's collision response can alter it — see
-# _on_hotdog_segment_body_entered for why the signal's own reported
-# velocity is unusable for a scripted head-bounce.
 var _pre_collision_velocity: Dictionary = {}
 
 var _score: int = 0
@@ -410,7 +161,6 @@ var _last_bounce_sound_time: int = -1000000
 var _debug_enabled: bool = false
 var _debug_nodes: Array[Node3D] = []
 
-# 0 = no skin (primitives visible); 1..SKIN_DEFS.size() = SKIN_DEFS[index-1].
 var _current_skin_index: int = 0
 var _head_skin_root: Node3D = null
 var _skin_label: Label
@@ -432,22 +182,10 @@ func _ready() -> void:
 	_setup_controls_ui()
 	_setup_score_ui()
 	_setup_skin_ui()
-	# Hidden for now, per feedback — the live-tuning panel is still fully
-	# wired up (_setup_tuning_ui, _add_slider), just not shown; uncomment to
-	# bring it back.
-	# _setup_tuning_ui()
-	# Starts on the Jamaican Sprinter skin — the base head (_setup_head)
-	# still exists exactly as before, just hidden by this the same way it
-	# always was when a skin is active (see _set_primitives_visible); F2
-	# only cycles between the two skins now, never back to the bare head.
 	_apply_skin(1)
 	GlobalTimer.start_counting()
 
 func _setup_materials() -> void:
-	# Starting values kept low — bounce compounds with the active hand
-	# spring on every contact, so what looks like a modest restitution value
-	# can still grow bounce height over repeated hits rather than settling.
-	# All three are live-editable from the tuning panel (see _setup_tuning_ui).
 	_arm_material = _physics_material(0.15, 0.2)
 	_hotdog_material = _physics_material(0.08, 0.35)
 	_environment_material = _physics_material(0.15, 0.2)
@@ -464,10 +202,6 @@ func _make_sound_player(stream: AudioStreamWAV) -> AudioStreamPlayer:
 	add_child(player)
 	return player
 
-## Synthesizes a short sine-wave beep as 16-bit mono PCM — no external audio
-## assets needed for these placeholder cues. A short linear fade in/out
-## avoids the harsh click a hard-edged tone would otherwise have at the
-## start and end of playback.
 func _make_beep_stream(freq: float, duration: float) -> AudioStreamWAV:
 	var mix_rate := 22050
 	var sample_count := int(duration * mix_rate)
@@ -592,10 +326,6 @@ func _setup_mouth_trigger() -> void:
 	shape.shape = sphere
 	trigger.add_child(shape)
 
-	# Same local offset as the mouth cutout itself, but pushed back along
-	# the head's front-facing axis (+Z) by MOUTH_SCORE_DEPTH — the front
-	# opening is at roughly local z = HEAD_RADIUS, so this sits that far
-	# past it, inside the tunnel rather than right at the rim.
 	trigger.position = HEAD_POS + Vector3(0, MOUTH_Y_OFFSET, HEAD_RADIUS - MOUTH_SCORE_DEPTH)
 	add_child(trigger)
 
@@ -610,20 +340,8 @@ func _on_mouth_trigger_body_entered(body: Node) -> void:
 	var hotdog_id: int = body.get_meta("hotdog_id", -1)
 	if hotdog_id == -1:
 		return
-	# Blocks scoring while ANY segment of this hotdog is still held by
-	# either hand — matches the doc's "must release/throw it in" rule
-	# rather than letting the player just push a held hotdog into the mouth.
 	if hotdog_id == _arm_left.held_hotdog_id or hotdog_id == _arm_right.held_hotdog_id:
 		return
-	# A hotdog is a multi-segment chain (HOTDOG_SEGMENTS capsules, all
-	# tagged with this same hotdog_id) — more than one segment can end up
-	# inside the trigger volume close together in time (or in the same
-	# tick), each independently firing this same signal. Without this
-	# guard, that scores the SAME hotdog multiple times — confirmed as the
-	# cause of an intermittent double (sometimes triple) score, depending
-	# on the chain's exact speed/orientation passing through the mouth.
-	# Checking the chain array directly (rather than a separate flag)
-	# reuses the exact "already scored" state _score_hotdog leaves behind.
 	if _hotdog_chains[hotdog_id].is_empty():
 		return
 	_score_hotdog(hotdog_id)
@@ -649,16 +367,7 @@ func _score_hotdog(hotdog_id: int) -> void:
 	if _hotdogs_remaining <= 0:
 		_restock_pyramids()
 
-## Untimed — the game just runs until WIN_SCORE, then hands off to a
-## placeholder next scene. That scene's real content isn't decided yet; this
-## is just the transition hook so it's easy to swap out later.
 func _on_win() -> void:
-	# Stops _physics_process from touching this scene's bodies on later
-	# frames while the transition is pending — change_scene_to_file frees
-	# the current scene at end-of-frame, not instantly, and without this
-	# guard the arm-driving code below kept firing on already-freed nodes
-	# on the next physics tick (confirmed via diagnostic: "apply force
-	# without a physics space" errors immediately after the winning score).
 	_game_won = true
 	get_tree().change_scene_to_file("res://scenes/win.tscn")
 
@@ -812,7 +521,6 @@ func _add_slider(parent: VBoxContainer, label_text: String, min_v: float, max_v:
 
 	parent.add_child(row)
 
-# --- Arm construction --------------------------------------------------
 
 func _basis_from_axis(dir: Vector3) -> Basis:
 	var y_axis := dir.normalized()
@@ -854,14 +562,6 @@ func _material(color: Color) -> StandardMaterial3D:
 	material.albedo_color = color
 	return material
 
-## Frosted-glass-style translucent material for the table/funnel surfaces —
-## per feedback, rather than shrinking the funnel slope's own reach (real
-## risk of undoing already-tuned "does a toss roll back" behavior), the
-## table itself becomes see-through so a skin's giant body (deliberately
-## sized to match its head, see _setup_body_skin) stays visible extending
-## down through it instead of being hidden behind opaque terrain. High
-## roughness (rather than a smooth/clear glass look) is what reads as
-## "frosted" — a diffuse, foggy translucency instead of a sharp see-through.
 func _frosted_material(color: Color, alpha: float = 0.35) -> StandardMaterial3D:
 	var material := StandardMaterial3D.new()
 	material.albedo_color = Color(color.r, color.g, color.b, alpha)
@@ -949,10 +649,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	grab_area.body_entered.connect(_on_grab_area_body_entered.bind(arm))
 	arm.hand.add_child(grab_area)
 
-	# Shoulder: Generic6DOFJoint3D, node_a left unset. Under Jolt (this
-	# project's physics engine), an unassigned joint slot resolves to world —
-	# the opposite convention from GodotPhysics — so this alone anchors the
-	# joint to a fixed point in space without a separate static anchor body.
 	var shoulder_joint := Generic6DOFJoint3D.new()
 	add_child(shoulder_joint)
 	shoulder_joint.global_transform = Transform3D(rest_basis, shoulder_pos)
@@ -960,12 +656,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	shoulder_joint.exclude_nodes_from_collision = true
 	_configure_6dof(shoulder_joint, -1.0)
 
-	# Elbow: HingeJoint3D, hinge axis = world X (the joint's local Z axis).
-	# Deliberately no angle limit and no motor — a free hinge the upper arm
-	# and forearm swing through on their own momentum/gravity/collisions,
-	# same as the shoulder's own unrestricted joint. Only the hinge's
-	# position (elbow_pos, the pivot between the two segments) is fixed;
-	# nothing constrains or drives the angle around it.
 	arm.elbow_joint = HingeJoint3D.new()
 	add_child(arm.elbow_joint)
 	arm.elbow_joint.global_transform = Transform3D(_basis_from_axis(Vector3.RIGHT), elbow_pos)
@@ -973,16 +663,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	arm.elbow_joint.node_b = arm.elbow_joint.get_path_to(arm.forearm)
 	arm.elbow_joint.exclude_nodes_from_collision = true
 
-	# Wrist: Generic6DOFJoint3D, linear locked but now free on all angular
-	# axes too (previously a 30-degree cone) — that limit meant the hand
-	# could only ever point within 30 degrees of wherever the forearm
-	# itself happened to be aimed, and since nothing now actively steers
-	# the forearm's own orientation (the elbow is a free hinge too), the
-	# whole arm tended to hang/extend in one narrow range of directions,
-	# making hotdogs that needed an awkward approach angle (e.g. toward
-	# the back of a funnel) effectively unreachable. Same treatment as the
-	# elbow: the joint still fixes the wrist's POSITION, only the angle
-	# around it is unconstrained.
 	var wrist_joint := Generic6DOFJoint3D.new()
 	add_child(wrist_joint)
 	wrist_joint.global_transform = Transform3D(rest_basis, wrist_pos)
@@ -1004,16 +684,6 @@ func _setup_arm(shoulder_pos: Vector3, input_prefix: String) -> ArmState:
 	return arm
 
 func _setup_table_and_pyramids() -> void:
-	# CSG, not a plain box: a flat box's collision has no way to have a hole
-	# in it, and simply overlaying the sloped funnel geometry on top isn't
-	# enough on its own — the funnel dips BELOW the flat table's constant
-	# height everywhere except right at its outer rim, so the still-present
-	# flat table underneath stays the topmost surface and a hotdog never
-	# actually reaches the slope (confirmed via diagnostic: it rested at
-	# exactly flat-table height, not the lower sloped height). CSG's
-	# use_collision generates real hole-having collision to match the
-	# visual subtraction, which a hand-authored shape would have to
-	# replicate manually anyway.
 	var table := CSGBox3D.new()
 	table.name = "Table"
 	table.size = TABLE_SIZE
@@ -1021,11 +691,6 @@ func _setup_table_and_pyramids() -> void:
 	table.collision_layer = 0
 	table.set_collision_layer_value(LAYER_TABLE, true)
 	table.material = _frosted_material(Color(0.5, 0.35, 0.22))
-	# CSGShape3D has no physics_material_override (confirmed earlier on the
-	# head — setting it there is a hard error), so this flat portion uses
-	# engine-default bounce/friction; the funnel walls and pit floors below
-	# (plain StaticBody3D, not CSG) still get the tuned _environment_material
-	# where it actually matters for gameplay (the sloped/rolling surfaces).
 	table.position = TABLE_POS
 
 	for pit_pos in [LEFT_PIT_POS, RIGHT_PIT_POS]:
@@ -1047,13 +712,6 @@ func _setup_table_and_pyramids() -> void:
 
 	_restock_pyramids()
 
-## Four plain (invisible) StaticBody3D panels ringing the table's edge —
-## nothing sits between the funnels and the table's own boundary (20x20,
-## see TABLE_SIZE), so a hard throw or a big bounce off the big slope can
-## otherwise send a hotdog sailing off the edge and falling forever, which
-## reads as "lost the hotdog" rather than a bounce. These use the same
-## tuned _environment_material as the rest of the terrain so they actually
-## bounce hotdogs back toward play instead of just deadstopping them.
 func _setup_table_walls() -> void:
 	var walls := StaticBody3D.new()
 	walls.name = "TableWalls"
@@ -1064,9 +722,6 @@ func _setup_table_walls() -> void:
 	var half_x := TABLE_SIZE.x * 0.5
 	var half_z := TABLE_SIZE.z * 0.5
 	var wall_thickness := 0.6
-	# Tall enough to catch anything thrown with real force (release velocity
-	# is tunable up to 8x peak hand speed) while staying well below the head,
-	# which sits well above the table — see HEAD_POS.
 	var wall_height := 6.0
 	var wall_center_y := TABLE_TOP_Y + wall_height * 0.5
 
@@ -1086,10 +741,6 @@ func _setup_table_walls() -> void:
 
 	add_child(walls)
 
-## Builds one capsule-chain hotdog (see HOTDOG_SEGMENTS etc.) centered at the
-## given world position, with each segment tagged with its chain index so
-## grab/score handlers can identify "which hotdog is this part of" from just
-## the RigidBody3D a signal handed them. Returns that chain index.
 func _make_hotdog_chain(center: Vector3) -> int:
 	var hotdog_id := _hotdog_chains.size()
 	var chain_dir := Vector3.RIGHT
@@ -1102,9 +753,6 @@ func _make_hotdog_chain(center: Vector3) -> int:
 		var seg_center := center + chain_dir * (start_offset + i * HOTDOG_SEGMENT_LEN)
 		var seg := _make_capsule_body("HotdogSeg", HOTDOG_SEGMENT_RADIUS, HOTDOG_SEGMENT_LEN + HOTDOG_SEGMENT_RADIUS * 2.0, 0.05, Color(0.75, 0.35, 0.25), _hotdog_material)
 		seg.global_transform = Transform3D(chain_basis, seg_center)
-		# Same rationale as the old single-capsule hotdog: a smooth capsule
-		# has almost no rolling resistance from friction alone, so without
-		# extra angular damping a single knock sends it rolling forever.
 		seg.angular_damp = 3.0
 		seg.set_collision_layer_value(LAYER_HOTDOG, true)
 		seg.set_collision_mask_value(LAYER_GROUND, true)
@@ -1113,19 +761,11 @@ func _make_hotdog_chain(center: Vector3) -> int:
 		seg.set_collision_mask_value(LAYER_HAND, true)
 		seg.set_collision_mask_value(LAYER_FACE, true)
 		seg.set_meta("hotdog_id", hotdog_id)
-		# Contact monitoring drives the placeholder "bounce" sound cue — a
-		# global cooldown plus a minimum speed (rather than per-segment
-		# state) keeps a settling pyramid of dozens of segments from turning
-		# into a machine-gun of retriggered beeps.
 		seg.contact_monitor = true
 		seg.max_contacts_reported = 4
 		seg.body_entered.connect(_on_hotdog_segment_body_entered.bind(seg))
 		add_child(seg)
 
-		# Cosmetic bun piece, per the design doc: non-colliding, no joints,
-		# just a child mesh riding along with this segment's own transform
-		# automatically (no per-frame follow code needed). Offset to one
-		# side rather than fully enclosing, "open-faced" like a real bun.
 		var bun := MeshInstance3D.new()
 		var bun_mesh := CapsuleMesh.new()
 		bun_mesh.radius = HOTDOG_SEGMENT_RADIUS * 1.4
@@ -1146,8 +786,6 @@ func _make_hotdog_chain(center: Vector3) -> int:
 		joint.node_a = joint.get_path_to(segments[i])
 		joint.node_b = joint.get_path_to(segments[i + 1])
 		joint.exclude_nodes_from_collision = true
-		# Some angular give so the chain visibly bends/flops (per the doc),
-		# but still limited so it can't fold in half or self-intersect.
 		_configure_6dof(joint, HOTDOG_JOINT_LIMIT_DEG)
 		joints.append(joint)
 
@@ -1155,10 +793,6 @@ func _make_hotdog_chain(center: Vector3) -> int:
 	_hotdog_chain_joints.append(joints)
 	return hotdog_id
 
-## Lays out PYRAMID_TOTAL hotdog chains in a 4-3-2-1 stacked pyramid (rows
-## spreading along Z, layers stacking up in Y) on the flat floor of the given
-## pit — spawned directly in their resting arrangement rather than dropped
-## from height, so nothing overlaps at spawn and the pyramid settles gently.
 func _spawn_pyramid(pit_pos: Vector3) -> void:
 	var pitch_z := HOTDOG_SEGMENT_RADIUS * 2.0 * 1.05
 	var pitch_y := HOTDOG_SEGMENT_RADIUS * 2.0 * 0.87
@@ -1175,11 +809,6 @@ func _restock_pyramids() -> void:
 	_spawn_pyramid(RIGHT_PIT_POS)
 	_hotdogs_remaining = PYRAMID_TOTAL * 2
 
-## Builds one funnel-shaped dip: a sloped ring (DIP_OUTER_RADIUS, at the main
-## table's height) down to a small flat pit (PIT_RADIUS, PIT_DEPTH lower) —
-## overlaid directly on top of the flat table rather than actually cutting a
-## hole in it, so a hotdog rolling near the pit meets the sloped surface
-## first and never reaches the flat table underneath at that spot.
 func _make_funnel_pit(pit_pos: Vector3) -> void:
 	var container := Node3D.new()
 	container.position = pit_pos
@@ -1202,8 +831,6 @@ func _make_funnel_pit(pit_pos: Vector3) -> void:
 
 	var funnel_body := StaticBody3D.new()
 	funnel_body.name = "FunnelWall"
-	# collision_layer defaults to layer 1 already set — clear it first so
-	# this body ends up on exactly LAYER_TABLE, not layer 1 AND LAYER_TABLE.
 	funnel_body.collision_layer = 0
 	funnel_body.set_collision_layer_value(LAYER_TABLE, true)
 	funnel_body.physics_material_override = _environment_material
@@ -1213,15 +840,6 @@ func _make_funnel_pit(pit_pos: Vector3) -> void:
 	mesh_inst.material_override = _frosted_material(Color(0.42, 0.29, 0.18))
 	funnel_body.add_child(mesh_inst)
 
-	# Collision is built from simple tilted BoxShape3D panels, NOT a
-	# ConcavePolygonShape3D matching the visual mesh above — confirmed via
-	# isolated diagnostic that a hand-built concave/trimesh shape here
-	# provides no collision response at all under Jolt (a ball dropped onto
-	# it free-fell straight through, reproduced at two different scales),
-	# while the exact same slope built from primitive boxes works
-	# correctly and a dropped ball visibly rolls toward the center as
-	# intended. Visual mesh and collision proxy simply differ here, same as
-	# the hotdog's cosmetic bun is meant to (per the original design doc).
 	for i in range(segments):
 		var mid := (float(i) + 0.5) / segments * TAU
 		var outer_pt := Vector3(cos(mid) * DIP_OUTER_RADIUS, 0.0, sin(mid) * DIP_OUTER_RADIUS)
@@ -1266,23 +884,6 @@ func _make_funnel_pit(pit_pos: Vector3) -> void:
 	pit_floor.add_child(floor_coll)
 	container.add_child(pit_floor)
 
-## Same radial-slope technique as _make_funnel_pit, extended out to
-## LARGE_SLOPE_RADIUS so the whole table drains toward the pits, not just
-## their immediate rims. Panels are clipped to global x on the same side as
-## this pit — since the two pits are mirrored across x=0, that split IS the
-## nearest-pit boundary, so the two basins drain into their own pit instead
-## of overlapping and fighting each other. Meets the small funnel exactly
-## at DIP_OUTER_RADIUS (same local height convention: 0 at that radius),
-## so the two slopes join up continuously.
-## Radius, along a given angle from this pit's own center, at which the
-## cone would cross the seam (the vertical plane exactly between the two
-## pits) — clamped to stay within [DIP_OUTER_RADIUS, LARGE_SLOPE_RADIUS] and
-## nudged slightly past the exact crossing (SEAM_MARGIN) so neighboring
-## panels' trimmed edges still touch with a hairline of overlap rather than
-## risking a gap. Angles pointing away from the seam (or exactly along it)
-## never cross, so they keep the full radius — this is what makes each
-## pit's cone stop at the dividing line instead of extending across into
-## the other cone and blocking sightlines through it.
 func _slope_outer_radius(pit_offset_x: float, angle: float) -> float:
 	const SEAM_MARGIN := 0.15
 	var c := cos(angle)
@@ -1316,14 +917,6 @@ func _make_big_slope(pit_pos: Vector3) -> void:
 		var outer_r1 := _slope_outer_radius(pit_offset_x, a1)
 		var outer_r2 := _slope_outer_radius(pit_offset_x, a2)
 
-		# The small funnel's own outer rim (DIP_OUTER_RADIUS) sits at LOCAL
-		# height 0 (unmodified table height) — so for the two slopes to
-		# connect continuously, THIS slope's inner edge must also be 0,
-		# meaning its outer (far) edge has to be ELEVATED above baseline
-		# and descend down TO baseline, not the reverse. Height at the
-		# (possibly seam-trimmed) outer radius comes from the same shared
-		# formula the contour rings use, so a trimmed panel's outer edge
-		# still lands at the correct height for wherever it was cut off.
 		var outer_pt := Vector3(cos(mid) * outer_r_mid, _terrain_height_at_radius(outer_r_mid), sin(mid) * outer_r_mid)
 		var inner_pt := Vector3(cos(mid) * DIP_OUTER_RADIUS, 0.0, sin(mid) * DIP_OUTER_RADIUS)
 		var outer1 := Vector3(cos(a1) * outer_r1, _terrain_height_at_radius(outer_r1), sin(a1) * outer_r1)
@@ -1356,10 +949,6 @@ func _make_big_slope(pit_pos: Vector3) -> void:
 	slope_body.add_child(mesh_inst)
 	container.add_child(slope_body)
 
-## Local height (relative to a pit's own origin) at a given radius from its
-## center — the exact same three-zone formula _make_funnel_pit and
-## _make_big_slope build geometry from, kept in one place so the contour
-## rings drawn below can never drift out of sync with the actual terrain.
 func _terrain_height_at_radius(radius: float) -> float:
 	if radius <= PIT_RADIUS:
 		return -PIT_DEPTH
@@ -1369,55 +958,17 @@ func _terrain_height_at_radius(radius: float) -> float:
 		return lerpf(0.0, LARGE_SLOPE_DEPTH, (radius - DIP_OUTER_RADIUS) / (LARGE_SLOPE_RADIUS - DIP_OUTER_RADIUS))
 	return LARGE_SLOPE_DEPTH
 
-## World-space terrain surface height at an arbitrary (x, z) — whichever
-## pit is nearer governs, matching how the slopes themselves are split.
-## Anything placed procedurally (initial hotdog spawn, resets, etc.) should
-## use this rather than assuming the old flat TABLE_TOP_Y: spawning below
-## the actual (now often-elevated) surface means starting inside solid
-## slope geometry, which the physics engine resolves by shoving the body
-## out — plausibly the real cause of the reported "hotdog rolls off
-## screen", not just the slope being too steep.
 func _terrain_world_height_at(world_x: float, world_z: float) -> float:
 	var dist_left := Vector2(world_x - LEFT_PIT_POS.x, world_z - LEFT_PIT_POS.z).length()
 	var dist_right := Vector2(world_x - RIGHT_PIT_POS.x, world_z - RIGHT_PIT_POS.z).length()
 	return TABLE_TOP_Y + _terrain_height_at_radius(minf(dist_left, dist_right))
 
-## True while `body` is currently touching a table/funnel/slope/ground
-## surface (any body tagged LAYER_TABLE or LAYER_GROUND) — requires
-## contact_monitor + max_contacts_reported already set on `body` (true for
-## hotdog segments and, now, arm segments too). Used to keep the funnel pull
-## from grabbing hotdogs/arms mid-air (a held or just-thrown hotdog, or an
-## arm reaching through the funnel's airspace) — it should only nudge things
-## actually resting on a surface toward the pit center.
 func _is_touching_table_surface(body: RigidBody3D) -> bool:
 	for other in body.get_colliding_bodies():
-		# NOT "other is CollisionObject3D" — confirmed via diagnostic that
-		# the flat table (a CSGBox3D) reports itself in get_colliding_bodies()
-		# same as any StaticBody3D would, but CSGShape3D doesn't actually
-		# extend CollisionObject3D, so that check silently excluded it and
-		# left anything resting on the flat table reading as "not touching"
-		# forever. CSGShape3D still exposes get_collision_layer_value
-		# natively (it's how the table's own layer got set up in the first
-		# place), so duck-typing on the method is enough.
 		if other.has_method("get_collision_layer_value") and (other.get_collision_layer_value(LAYER_TABLE) or other.get_collision_layer_value(LAYER_GROUND)):
 			return true
 	return false
 
-## Nudges anything within a funnel's outer radius toward that pit's exact
-## XZ center — see _funnel_center_pull_strength for why this exists on top
-## of the slope/floor geometry. Horizontal only (no Y component), so it
-## never fights gravity or lifts anything; within the funnel, "toward
-## center" and "downhill" are the same direction anyway, since terrain
-## height there is purely a function of radius. Only applies to bodies
-## actually resting on the table/funnel surface (see
-## _is_touching_table_surface) — otherwise a thrown or held hotdog passing
-## over a funnel mid-air, or an arm merely reaching over one, would get
-## yanked sideways with no contact to justify it.
-##
-## Also handles the opposite extreme: anything that landed beyond
-## LARGE_SLOPE_RADIUS, past where the terrain has any slope at all, gets a
-## fixed (non-spring) nudge toward whichever pit is nearer — see
-## _long_range_return_strength.
 func _apply_funnel_center_pull(body: RigidBody3D) -> void:
 	if not _is_touching_table_surface(body):
 		return
@@ -1429,49 +980,16 @@ func _apply_funnel_center_pull(body: RigidBody3D) -> void:
 	if dist < DIP_OUTER_RADIUS:
 		body.apply_central_force(-offset * _funnel_center_pull_strength)
 	else:
-		# Used to only fire past LARGE_SLOPE_RADIUS, relying on the terrain's
-		# own slope for everything in between — confirmed via diagnostic
-		# that a hotdog can rest indefinitely on the big slope's own seam
-		# area (where the two pits' cones meet and get angularly trimmed —
-		# see _slope_outer_radius) well inside that radius, with a near-zero
-		# residual velocity and nothing correcting it. This "everywhere
-		# outside the close spring zone" nudge closes that gap too, not
-		# just the fully-flat area beyond the slope.
 		body.apply_central_force(-offset.normalized() * _long_range_return_strength)
 
-# Anything genuinely on the table never gets anywhere near this low —
-# confirmed via diagnostic that the two funnel slopes' seam (where each
-# pit's cone gets angularly trimmed so the two don't overlap — see
-# _slope_outer_radius) has a real gap somewhere along it: an object pulled
-# straight down that line (roughly equidistant from both pits, e.g. by
-# _long_range_return_strength above) can tunnel through into permanent
-# freefall instead of landing on either slope. Rather than re-deriving that
-# seam mesh (real risk of trading one edge case for another), anything that
-# falls this far below the table gets teleported back — a standard
-# "fell through the floor" safety net, and strictly better than a hotdog
-# just vanishing into the void forever.
 const FALLEN_KILL_Y := -5.0
 
-## True if `body` is resting on the under-table "Ground" plinth (LAYER_GROUND,
-## see _setup_ground) — a second, much more common tunneling case found via
-## diagnostic: a hotdog pulled through the SMALL funnel's own collision (a
-## separate set of tilted panels from the big slope's, see _make_funnel_pit)
-## can slip through it too, but rather than free-falling forever it lands on
-## this plinth sitting below the whole table and just stops there — stable,
-## so it would never trip the FALLEN_KILL_Y check above, but just as
-## unreachable/invisible as actually falling through. Legitimate hotdog rest
-## surfaces are all LAYER_TABLE; LAYER_GROUND is never one of them, so
-## touching it at all is itself the signal to rescue, regardless of height.
 func _is_touching_ground_plinth(body: RigidBody3D) -> bool:
 	for other in body.get_colliding_bodies():
 		if other.has_method("get_collision_layer_value") and other.get_collision_layer_value(LAYER_GROUND):
 			return true
 	return false
 
-## Teleports a WHOLE hotdog chain back above whichever pit it was nearest to
-## when it fell through — moved by one shared rigid delta (same trick
-## _grab_hotdog uses) so the chain's own permanent inter-segment joints
-## don't get stressed by only one segment jumping.
 func _rescue_hotdog_chain_if_fallen(chain: Array) -> void:
 	if chain.is_empty():
 		return
@@ -1491,10 +1009,6 @@ func _rescue_hotdog_chain_if_fallen(chain: Array) -> void:
 			seg.linear_velocity = Vector3.ZERO
 			seg.angular_velocity = Vector3.ZERO
 
-## Topographic contour rings (like a map's elevation lines) at fixed radius
-## steps around a pit, each drawn flat at its own actual terrain height —
-## a temporary read-the-terrain aid while shaping the slopes, toggled by
-## F1 along with the other debug visualizations.
 func _setup_terrain_contours(pit_pos: Vector3) -> void:
 	var step := 0.5
 	var radius := step
@@ -1521,11 +1035,6 @@ func _grab_hotdog(arm: ArmState, segment: RigidBody3D, hotdog_id: int) -> void:
 	arm.held_segment = segment
 	arm.held_hotdog_id = hotdog_id
 
-	# Snap the WHOLE chain by the same rigid delta (not just the grabbed
-	# segment) so the grabbed link lines up exactly with the hand while
-	# every inter-segment joint keeps zero slack — moving only the grabbed
-	# segment would instantly violate its neighbors' zero-play linear limit
-	# and pop the chain apart.
 	var delta := arm.hand.global_transform * segment.global_transform.affine_inverse()
 	for seg in _hotdog_chains[hotdog_id]:
 		seg.global_transform = delta * seg.global_transform
@@ -1558,24 +1067,7 @@ func _peak_hand_velocity(arm: ArmState) -> Vector3:
 func _release_held_hotdog(arm: ArmState) -> void:
 	if arm.held_segment == null:
 		return
-	# Uses the PEAK velocity from the last THROW_VELOCITY_SAMPLES ticks,
-	# not the hand's exact velocity at this instant — confirmed via
-	# diagnostic that a real swing-then-release play pattern (let go of
-	# the movement key, THEN reach for the separate release key) loses
-	# most of its speed to target gravity/damping in well under half a
-	# second, before the player can physically press release. Without
-	# this, a swing that clearly built up real speed a moment earlier
-	# still throws with almost none. Then scaled up by
-	# _release_velocity_multiplier (same direction, just faster) since the
-	# arm's own motion alone reads as too weak to throw with.
 	var release_velocity := _peak_hand_velocity(arm) * _release_velocity_multiplier
-	# Applied to EVERY segment of the chain, not just the held one —
-	# confirmed via diagnostic that setting only the held segment's
-	# velocity doesn't survive the next physics step: the hotdog's own
-	# inter-segment joints (zero linear play, permanent, separate from the
-	# grab joint) immediately average that one segment's boosted velocity
-	# against its still-slow neighbors, and the whole chain ends up well
-	# below the intended speed within a single tick.
 	for seg in _hotdog_chains[arm.held_hotdog_id]:
 		if is_instance_valid(seg):
 			seg.linear_velocity = release_velocity
@@ -1587,27 +1079,11 @@ func _release_held_hotdog(arm: ArmState) -> void:
 	arm.hand_mesh.material_override = _material(HAND_OPEN_COLOR)
 	_throw_sound.play()
 
-## Fires on any hotdog-segment collision. Two independent things happen
-## here: a scripted bounce off the head's solid skull (see
-## _head_bounce_restitution for why this can't just be a physics material),
-## and the placeholder "bounce" sound cue, gated by a single GLOBAL cooldown
-## (not per-segment) so a whole pyramid settling at once can't turn into a
-## machine-gun of beeps.
 func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
 	if body == _head_visual:
 		var away := segment.global_position - HEAD_POS
 		if away.length() > 0.001:
 			var normal := away.normalized()
-			# NOT segment.linear_velocity — confirmed via diagnostic that by
-			# the time this signal fires, Jolt has already run this tick's
-			# collision response against the head's un-tunable default
-			# material and killed almost all of the incoming speed (an
-			# actual ~4 m/s impact showed up here as ~0.2-0.4 m/s), so
-			# reflecting that would produce a barely-visible nudge instead
-			# of a real bounce. _pre_collision_velocity holds each segment's
-			# velocity from the START of this same physics tick (set in
-			# _physics_process, which always runs before the physics step
-			# that triggers this signal), i.e. the true pre-impact velocity.
 			var v: Vector3 = _pre_collision_velocity.get(segment, segment.linear_velocity)
 			segment.linear_velocity = (v - 2.0 * v.dot(normal) * normal) * _head_bounce_restitution
 
@@ -1619,26 +1095,6 @@ func _on_hotdog_segment_body_entered(body: Node, segment: RigidBody3D) -> void:
 	_last_bounce_sound_time = now
 	_bounce_sound.play()
 
-# --- Skins ----------------------------------------------------------------
-#
-# A skin overlays a rigged .glb's mesh on top of the invisible physics
-# scaffolding (the capsules stay the actual simulated bodies and keep their
-# collision; only their cosmetic "Mesh" child gets hidden). Each arm's three
-# relevant bones (upper/fore/hand) are posed every physics tick via
-# Skeleton3D.set_bone_global_pose_override to match that arm's capsules; the
-# head bone gets one fixed pose at setup time since the head never moves.
-#
-# The whole rest of the rig (torso, legs, the OTHER arm) is hidden by
-# collapsing a single ancestor bone ("hide_root_bone", e.g. "hips") to a
-# near-zero scale — confirmed via an isolated bone-posing test that an
-# explicitly-overridden DESCENDANT bone still renders normally at its own
-# override transform regardless of an ancestor's collapsed override, which
-# is exactly what makes "show only this one arm chain" possible from a
-# single full-body skinned mesh without any actual mesh editing.
-
-## A skin is always active — the bare-head state is still there underneath
-## (see _setup_head/_ready) but no longer reachable by cycling, so this just
-## wraps around the two entries in SKIN_DEFS.
 func _cycle_skin() -> void:
 	_apply_skin((_current_skin_index % SKIN_DEFS.size()) + 1)
 
@@ -1682,10 +1138,6 @@ func _find_skeleton(node: Node) -> Skeleton3D:
 			return found
 	return null
 
-## Accumulates a bone's REST transform (parent-relative) up its whole parent
-## chain to get its rest pose in the skeleton's own space — used to measure
-## the rig's own rest-pose "arm direction" per bone (see _compute_rest_dirs)
-## and, for the head, to keep its natural rest orientation when relocating it.
 func _bone_global_rest(skeleton: Skeleton3D, bone_idx: int) -> Transform3D:
 	var chain := []
 	var idx := bone_idx
@@ -1697,13 +1149,6 @@ func _bone_global_rest(skeleton: Skeleton3D, bone_idx: int) -> Transform3D:
 		accum = accum * skeleton.get_bone_rest(b)
 	return accum
 
-## For each of upper/fore/hand, the direction (in that BONE'S OWN rest-local
-## frame) the rig's rest pose points "down the limb" toward the next joint —
-## this is the fixed reference we rotate at runtime to match wherever our
-## physics capsule currently points (see _pose_skin_bone). The hand has no
-## child bone to measure toward, so it reuses the forearm's own direction as
-## a reasonable proxy (a common convention: the hand roughly continues the
-## forearm's rest-pose pointing direction).
 func _compute_rest_dirs(skeleton: Skeleton3D, bones: Dictionary) -> Dictionary:
 	var upper_idx: int = skeleton.find_bone(bones["upper"])
 	var fore_idx: int = skeleton.find_bone(bones["fore"])
@@ -1742,21 +1187,6 @@ func _setup_arm_skin(arm: ArmState, def: Dictionary, bones: Dictionary) -> void:
 	}
 	arm.skin_rest_dirs = _compute_rest_dirs(skeleton, bones)
 
-## Unlike the arms, the head never moves dynamically in this game, so it
-## doesn't need to stay a live skinned mesh at all — a plain positioned
-## MeshInstance3D, set once, does the job (see _extract_bone_weighted_mesh).
-##
-## source_skeleton is an ALREADY-instantiated skeleton — in practice one of
-## the two arm skins' own — deliberately reused here rather than instancing
-## this glb a third time. Confirmed via bisection across several diagnostic
-## renders that a THIRD live instance of the same skinned scene corrupts
-## rendering somewhere entirely unrelated to anything this function does
-## with it afterward (symptoms varied run to run — a large wrongly-shaped
-## mass, or the whole scene going black — and a minimal instantiate-and-
-## add_child-only reproduction, with no bone/mesh logic at all, showed it
-## too). Since only mesh/bone-rest DATA is needed here, not a live scene of
-## its own, reading it off an instance that already exists sidesteps the
-## bug rather than working around its symptoms.
 func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	var head_idx := source_skeleton.find_bone(def["head_bone"])
 	var head_rest := _bone_global_rest(source_skeleton, head_idx)
@@ -1771,11 +1201,6 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 
 	var static_inst := MeshInstance3D.new()
 	static_inst.mesh = head_mesh
-	# Anchor on the head MESH's own bounding-box center, not the head
-	# BONE's rest origin — a rig's head bone sits near the jaw/chin (this
-	# one's rest origin is at the very bottom of the head's own AABB, not
-	# its middle), so anchoring on the bone origin mapped the chin, not the
-	# center, onto HEAD_POS and left the whole head floating too high.
 	var anchor_local := bbox.position + bbox.size * 0.5
 	var scaled_basis := head_rest.basis.scaled(Vector3.ONE * head_scale)
 	static_inst.transform = Transform3D(scaled_basis, HEAD_POS - scaled_basis * anchor_local)
@@ -1787,21 +1212,6 @@ func _setup_head_skin(def: Dictionary, source_skeleton: Skeleton3D) -> void:
 	if bbox.size != Vector3.ZERO:
 		_apply_head_mouth_hole(static_inst, bbox, head_scale)
 
-## Gives the floating head an actual body — everything but the head and
-## arms (see _extract_body_mesh) from the SAME source mesh, in the SAME
-## bind-pose coordinate space, added as a CHILD of the head's own
-## MeshInstance3D with an identity local transform, so it inherits that
-## exact same scaled_basis/HEAD_POS-anchored transform rather than getting
-## an independently derived one — head and body read as the same avatar
-## instance at the same scale, just showing more of it below the neck,
-## instead of a separately-resized statue bolted on underneath (freeing
-## _head_skin_root in _teardown_skin cleans this up too, no separate
-## tracking var needed). Also builds a matching STATIC collision hull (a
-## convex hull, not a concave trimesh — see _make_funnel_pit's own comment
-## on why a hand-built concave shape gave zero collision response under
-## Jolt) on LAYER_FACE, the same layer the head itself collides on, so
-## hotdogs/arms already masked for that layer bounce off it with no extra
-## collision-mask setup.
 func _setup_body_skin(def: Dictionary, source_skeleton: Skeleton3D, source_mesh: Mesh, head_idx: int, head_mesh_inst: MeshInstance3D) -> void:
 	var excluded_bones := [head_idx]
 	for side_bones in [def["left_arm_bones"], def["right_arm_bones"]]:
@@ -1843,23 +1253,9 @@ void vertex() {
 }
 
 void fragment() {
-	// Paints the mouth region dark rather than discarding it — a discard
-	// sphere centered near the face's front surface doesn't reach back
-	// far enough to also discard the head's own back-interior wall, so it
-	// only ever revealed a solid (if oddly shaded) patch of the mesh's own
-	// inside rather than true background, confirmed via diagnostic render.
 	if (distance(v_world_pos, mouth_center_world) < mouth_radius_world) {
 		ALBEDO = vec3(0.02, 0.02, 0.02);
 	} else if (has_texture) {
-		// Some skins (Joey Chestnut) bake facial detail — eyes, mouth — into
-		// a small textured surface rather than flat per-surface colors;
-		// confirmed via diagnostic that this surface's own material has
-		// albedo forced to flat white specifically because the texture is
-		// meant to supply all of its actual color. Falling back to base_color
-		// (as this shader originally did unconditionally) discarded that
-		// texture entirely, rendering it as a blank white patch instead of a
-		// face — sample it here instead, same as the un-shadered surfaces
-		// already do natively.
 		ALBEDO = texture(base_texture, UV).rgb;
 	} else {
 		ALBEDO = base_color.rgb;
@@ -1876,13 +1272,6 @@ func _find_mesh_instance(node: Node) -> MeshInstance3D:
 			return found
 	return null
 
-## Bounding box, in the mesh's own bind-pose (pre-pose, object-local) space,
-## of vertices weighted predominantly to one bone — measures a skin's own
-## head size/shape at runtime rather than hardcoding per-skin numbers, so
-## the mouth-hole placement below works unmodified for any similarly-rigged
-## skin. Scans every surface, not just surface 0, since a multi-material
-## mesh (like this rig's 5 material surfaces) can split head geometry
-## across more than one.
 func _measure_bone_weighted_aabb(mesh: Mesh, bone_idx: int, min_weight: float = 0.4) -> AABB:
 	var min_v := Vector3(INF, INF, INF)
 	var max_v := Vector3(-INF, -INF, -INF)
@@ -1907,14 +1296,6 @@ func _measure_bone_weighted_aabb(mesh: Mesh, bone_idx: int, min_weight: float = 
 		return AABB()
 	return AABB(min_v, max_v - min_v)
 
-## Shared triangle-copy machinery behind _extract_bone_weighted_mesh (a
-## skin's head) and _extract_body_mesh (everything else — see
-## _setup_head_skin) — builds a plain, non-skinned ArrayMesh containing just
-## the triangles whose vertices all satisfy keep_vertex(vertex_index,
-## bones_per_vertex, bones, weights). UVs are preserved (not just
-## vertex/normal) — most surfaces here are flat-colored with no UVs that
-## matter, but at least one (Joey Chestnut's face) bakes its actual detail
-## into a texture, and losing UVs would leave that surface unsampleable.
 func _extract_mesh_where(mesh: Mesh, keep_vertex: Callable) -> ArrayMesh:
 	var out := ArrayMesh.new()
 	for surf in range(mesh.get_surface_count()):
@@ -1923,9 +1304,6 @@ func _extract_mesh_where(mesh: Mesh, keep_vertex: Callable) -> ArrayMesh:
 		var bones: PackedInt32Array = arrays[Mesh.ARRAY_BONES]
 		var weights: PackedFloat32Array = arrays[Mesh.ARRAY_WEIGHTS]
 		var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
-		# A surface with no UVs at all reports this slot as null, not an
-		# empty array (confirmed via diagnostic against the sprinter rig,
-		# which has none) — the typed assignment below would otherwise fail.
 		var uvs: PackedVector2Array = arrays[Mesh.ARRAY_TEX_UV] if arrays[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
 		var indices: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
 		if verts.is_empty() or bones.is_empty():
@@ -1979,11 +1357,6 @@ func _extract_mesh_where(mesh: Mesh, keep_vertex: Callable) -> ArrayMesh:
 		out.surface_set_material(out.get_surface_count() - 1, mesh.surface_get_material(surf))
 	return out
 
-## Builds a plain, non-skinned ArrayMesh containing just the triangles
-## whose vertices are predominantly weighted to one bone — used to pull a
-## static copy of a skin's head geometry out of its full-body skinned
-## mesh (see _setup_head_skin for why the head is rendered this way
-## instead of staying a live skinned mesh like the arms).
 func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 0.4) -> ArrayMesh:
 	return _extract_mesh_where(mesh, func(i: int, bpv: int, bones: PackedInt32Array, weights: PackedFloat32Array) -> bool:
 		var w := 0.0
@@ -1993,13 +1366,6 @@ func _extract_bone_weighted_mesh(mesh: Mesh, bone_idx: int, min_weight: float = 
 		return w >= min_weight
 	)
 
-## The complement of _extract_bone_weighted_mesh: everything NOT
-## predominantly weighted to one of excluded_bones — used to pull a skin's
-## torso+legs out as a separate static "body" beneath its head, excluding
-## both the head bone (its own separate mesh, see above) and every arm bone
-## (those stay a LIVE skinned mesh, posed each tick onto the physics arms —
-## see _setup_arm_skin; a static copy of them here would just double up as
-## a second, non-moving arm frozen in the rig's rest pose).
 func _extract_body_mesh(mesh: Mesh, excluded_bones: Array) -> ArrayMesh:
 	return _extract_mesh_where(mesh, func(i: int, bpv: int, bones: PackedInt32Array, weights: PackedFloat32Array) -> bool:
 		var excluded_w := 0.0
@@ -2009,23 +1375,6 @@ func _extract_body_mesh(mesh: Mesh, excluded_bones: Array) -> ArrayMesh:
 		return excluded_w < 0.4
 	)
 
-## Marks the mouth on a skin's head mesh — the skinned-mesh equivalent of
-## the placeholder head's CSG subtraction, since you can't boolean-
-## subtract an arbitrary imported skinned mesh. A per-surface shader
-## paints a world-space sphere near the mouth position dark (preserving
-## each surface's own flat color everywhere else) rather than trying to
-## discard through to the background — a discard sphere centered near the
-## face's front surface doesn't reach back far enough to also discard the
-## head's own back-interior wall, so it only ever revealed a solid patch
-## of the mesh's own inside rather than true background (confirmed via
-## diagnostic render), and a plain dark patch reads as a mouth well enough
-## without needing to solve that. Position/size come from MEASURING the
-## skin's own head mesh
-## at runtime (see _measure_bone_weighted_aabb) and reusing this game's own
-## mouth proportions (MOUTH_HEIGHT_FRACTION, MOUTH_RADIUS_RATIO) against
-## that measurement — not a hardcoded per-skin number — so this works
-## unmodified for any similarly-rigged skin (front = +Z is this whole
-## skin system's existing convention, not a new one introduced here).
 func _apply_head_mouth_hole(mesh_inst: MeshInstance3D, bbox: AABB, head_scale: float) -> void:
 	var local_pos := Vector3(
 		bbox.position.x + bbox.size.x * 0.5,
@@ -2035,8 +1384,6 @@ func _apply_head_mouth_hole(mesh_inst: MeshInstance3D, bbox: AABB, head_scale: f
 	var own_head_radius := bbox.size.x * 0.5
 	var local_radius := own_head_radius * MOUTH_RADIUS_RATIO
 
-	# mesh_inst.transform already maps this exact bind-pose space to world
-	# (see _setup_head_skin), so the mouth point rides along automatically.
 	var mouth_world: Vector3 = mesh_inst.global_transform * local_pos
 	var mouth_radius_world := local_radius * head_scale
 
@@ -2059,15 +1406,6 @@ func _apply_head_mouth_hole(mesh_inst: MeshInstance3D, bbox: AABB, head_scale: f
 			mat.set_shader_parameter("base_texture", orig_texture)
 		mesh_inst.set_surface_override_material(surf, mat)
 
-## Poses one arm's three skinned bones to match its physics capsules —
-## rotation comes from rotating each bone's own rest-local "arm direction"
-## (see _compute_rest_dirs) onto the capsule's current pointing direction
-## (its local Y, by this project's own capsule-orientation convention),
-## scaled by this skin's own arm scale (see the _setup_head_skin comment on
-## why that scale has to be baked into the override basis, not inst.scale);
-## origin is that joint's actual current position, not the capsule's own
-## center (a bone's origin is the PROXIMAL joint, confirmed by comparing the
-## rig's measured rest bone positions against its own parent chain).
 func _update_arm_skin_pose(arm: ArmState) -> void:
 	if arm.skin_skeleton == null:
 		return
@@ -2089,8 +1427,6 @@ func _update_arm_skin_pose(arm: ArmState) -> void:
 	var hand_rot := Basis(Quaternion(arm.skin_rest_dirs["hand"], hand_basis.y.normalized())).scaled(scale_vec)
 	skeleton.set_bone_global_pose_override(arm.skin_bone_idx["hand"], to_local * Transform3D(hand_rot, wrist_pos), 1.0, true)
 
-# --- Per-frame control ---------------------------------------------------
-
 func _physics_process(delta: float) -> void:
 	if _game_won:
 		return
@@ -2110,10 +1446,6 @@ func _physics_process(delta: float) -> void:
 	for chain in _hotdog_chains:
 		for seg in chain:
 			if is_instance_valid(seg):
-				# Snapshot BEFORE this tick's physics step resolves any new
-				# collision — see _on_hotdog_segment_body_entered/
-				# _pre_collision_velocity for why the signal itself can't be
-				# trusted for this.
 				_pre_collision_velocity[seg] = seg.linear_velocity
 				_apply_funnel_center_pull(seg)
 		_rescue_hotdog_chain_if_fallen(chain)
@@ -2148,10 +1480,6 @@ func _process_arm(arm: ArmState, delta: float) -> void:
 	if offset.length() > MAX_REACH:
 		var radial_dir := offset.normalized()
 		arm.target_pos = arm.shoulder_pos + radial_dir * MAX_REACH
-		# Drop only the outward component so the target doesn't keep
-		# accumulating unbounded "phantom" velocity while pinned at the
-		# reach limit — that pent-up velocity made direction changes feel
-		# sluggish (and was overshooting into wild uncontrolled swings).
 		var outward_vel := arm.target_vel.dot(radial_dir)
 		if outward_vel > 0.0:
 			arm.target_vel -= radial_dir * outward_vel
@@ -2190,8 +1518,6 @@ func _reset_arm(arm: ArmState) -> void:
 func _reset_arms() -> void:
 	_reset_arm(_arm_left)
 	_reset_arm(_arm_right)
-
-# --- Debug visualization (F1) --------------------------------------------
 
 func _make_wire_mesh(builder: Callable) -> MeshInstance3D:
 	var st := SurfaceTool.new()
@@ -2245,11 +1571,6 @@ func _setup_debug_visuals(arm: ArmState) -> void:
 	add_child(reach_sphere)
 	_debug_nodes.append(reach_sphere)
 
-	# No elbow limit arc or wrist limit cone here anymore — both are now
-	# free joints with no angle limit (see _setup_arm), so there's no
-	# bound left to illustrate for either.
-
-	# Hand grab radius, parented to the hand so it tracks automatically.
 	var grab_sphere_debug := _make_wire_sphere(GRAB_RADIUS)
 	arm.hand.add_child(grab_sphere_debug)
 	_debug_nodes.append(grab_sphere_debug)
