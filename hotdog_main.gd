@@ -441,6 +441,7 @@ func _ready() -> void:
 	# always was when a skin is active (see _set_primitives_visible); F2
 	# only cycles between the two skins now, never back to the bare head.
 	_apply_skin(1)
+	GlobalTimer.start_counting()
 
 func _setup_materials() -> void:
 	# Starting values kept low — bounce compounds with the active hand

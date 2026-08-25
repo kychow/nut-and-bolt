@@ -17,6 +17,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+GlobalTimer="*res://scripts/global_timer.gd"
 McpInteractionServer="*res://scripts/mcp_interaction_server.gd"
 
 [display]

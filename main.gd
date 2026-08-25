@@ -19,9 +19,7 @@ var _player: Player
 var _has_finished := false
 var _has_started := false
 
-var _elapsed_time := 0.0
 var _hud_canvas_layer = null
-var _timer_label = null
 var _win_label = null
 var _restart_label = null
 
@@ -30,6 +28,7 @@ var _instructions_layer: CanvasLayer = null
 
 
 func _ready() -> void:
+	GlobalTimer.stop_counting()
 	_setup_environment()
 	_setup_lighting()
 	_setup_floor()
@@ -439,42 +438,43 @@ func _create_hud() -> void:
 	canvas_layer.name = "HUD"
 	add_child(canvas_layer)
 
-	var vbox := VBoxContainer.new()
-	vbox.name = "HUDVBox"
-	vbox.anchor_left = 0.0
-	vbox.anchor_right = 1.0
-	vbox.anchor_top = 0.0
-	vbox.anchor_bottom = 0.0
-	vbox.offset_top = 24.0
-	vbox.alignment = BoxContainer.ALIGNMENT_CENTER
-	vbox.add_theme_constant_override("separation", 8)
-	canvas_layer.add_child(vbox)
-
-	var timer_label := Label.new()
-	timer_label.name = "TimerLabel"
-	timer_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
-	timer_label.add_theme_font_size_override("font_size", 36)
-	timer_label.text = "Time: %02.1fs" % _elapsed_time
-	vbox.add_child(timer_label)
-
 	var win_label := Label.new()
 	win_label.name = "WinLabel"
 	win_label.text = "YOU WIN!"
-	win_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	win_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	win_label.anchor_left = 0.0
+	win_label.anchor_right = 1.0
+	win_label.anchor_top = 0.0
+	win_label.anchor_bottom = 0.0
+	win_label.offset_right = 0.0
+	win_label.offset_top = 68.0
+	win_label.offset_bottom = 120.0
 	win_label.add_theme_font_size_override("font_size", 48)
+	win_label.add_theme_color_override("font_color", Color.WHITE)
+	win_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	win_label.add_theme_constant_override("outline_size", 6)
 	win_label.visible = false
-	vbox.add_child(win_label)
+	canvas_layer.add_child(win_label)
 
 	var restart_label := Label.new()
 	restart_label.name = "RestartLabel"
 	restart_label.text = "Press R to restart"
-	restart_label.horizontal_alignment = HorizontalAlignment.HORIZONTAL_ALIGNMENT_CENTER
+	restart_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	restart_label.anchor_left = 0.0
+	restart_label.anchor_right = 1.0
+	restart_label.anchor_top = 0.0
+	restart_label.anchor_bottom = 0.0
+	restart_label.offset_right = 0.0
+	restart_label.offset_top = 124.0
+	restart_label.offset_bottom = 156.0
 	restart_label.add_theme_font_size_override("font_size", 24)
+	restart_label.add_theme_color_override("font_color", Color.WHITE)
+	restart_label.add_theme_color_override("font_outline_color", Color.BLACK)
+	restart_label.add_theme_constant_override("outline_size", 6)
 	restart_label.visible = false
-	vbox.add_child(restart_label)
+	canvas_layer.add_child(restart_label)
 
 	_hud_canvas_layer = canvas_layer
-	_timer_label = timer_label
 	_win_label = win_label
 	_restart_label = restart_label
 
@@ -582,6 +582,7 @@ func _dismiss_instructions() -> void:
 	if _has_started:
 		return
 	_has_started = true
+	GlobalTimer.start_counting()
 	if _instructions_layer == null:
 		return
 	var layer := _instructions_layer
@@ -620,14 +621,13 @@ func _process(delta: float) -> void:
 			_win_label.visible = true
 			_restart_label.visible = true
 		if Input.is_key_pressed(KEY_R):
+			GlobalTimer.reset()
 			get_tree().change_scene_to_file("res://hotdog_main.tscn")
 		return
 
 	if not _has_started:
 		return
 
-	_elapsed_time += delta
-	_timer_label.text = "Time: %02.1fs" % _elapsed_time
-
 	if _player.position.z <= -50.0:
 		_has_finished = true
+		GlobalTimer.stop_counting()

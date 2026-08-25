@@ -3,6 +3,7 @@ extends Node2D
 var _dismissed := false
 
 func _ready() -> void:
+	GlobalTimer.stop_counting()
 	var layer := CanvasLayer.new()
 
 	var bg := ColorRect.new()
