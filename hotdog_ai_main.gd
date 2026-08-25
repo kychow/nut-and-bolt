@@ -136,7 +136,7 @@ func _add_bolt() -> void:
 		animation_player.stop()
 		animation_player.active = false
 
-	mouth_marker = _ellipsoid(Vector3(1, 1.75, 0), mouth_world, Color("#171412"))
+	mouth_marker = _ellipsoid(Vector3(0.075, 0.025, 0.01), mouth_world, Color("#171412"))
 	add_child(mouth_marker)
 
 func _setup_bolt_rig() -> void:
@@ -160,7 +160,7 @@ func _setup_bolt_rig() -> void:
 	var head_idx: int = skeleton.find_bone("head")
 	if head_idx >= 0:
 		var head_pos: Vector3 = _bone_world_position(head_idx)
-		mouth_world = head_pos + Vector3(0.0, -0.015, 0.12)
+		mouth_world = head_pos + Vector3(0.25, 0.215, 0.42)
 		if mouth_marker:
 			mouth_marker.global_position = mouth_world
 
