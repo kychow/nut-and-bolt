@@ -71,6 +71,14 @@ func _unhandled_input(event: InputEvent) -> void:
 		hand_target.x = clamp(hand_target.x, -0.58, 0.58)
 
 func _build_world() -> void:
+	RunningTrackBuilder.add_environment(self)
+	RunningTrackBuilder.add_sun(self)
+	RunningTrackBuilder.add_grass(self, 30.0)
+	RunningTrackBuilder.add_track(self, 12.0, 30.0)
+	RunningTrackBuilder.add_lane_lines(self, 12.0, 30.0)
+	RunningTrackBuilder.add_start_line(self, 12.0)
+	RunningTrackBuilder.add_finish_line(self, 12.0)
+
 	camera = Camera3D.new()
 	camera.projection = Camera3D.PROJECTION_ORTHOGONAL
 	camera.size = 2.55
@@ -78,31 +86,16 @@ func _build_world() -> void:
 	camera.look_at(Vector3(0.0, 1.25, 0.0))
 	add_child(camera)
 
-	var light: DirectionalLight3D = DirectionalLight3D.new()
-	light.rotation_degrees = Vector3(-35.0, -20.0, 0.0)
-	light.light_energy = 1.15
-	add_child(light)
-
 	var fill: OmniLight3D = OmniLight3D.new()
 	fill.position = Vector3(0.0, 2.0, 2.0)
 	fill.omni_range = 7.0
 	fill.light_energy = 1.1
 	add_child(fill)
 
-	_add_floor()
 	_add_table()
 	_add_bolt()
 	_add_hotdog()
 	_add_ui()
-
-func _add_floor() -> void:
-	var floor: MeshInstance3D = MeshInstance3D.new()
-	var mesh: BoxMesh = BoxMesh.new()
-	mesh.size = Vector3(5.5, 0.08, 3.5)
-	floor.mesh = mesh
-	floor.position = Vector3(0.0, -0.04, 0.0)
-	floor.material_override = _mat(Color("#d9d0c1"))
-	add_child(floor)
 
 func _add_table() -> void:
 	var top: MeshInstance3D = _box(Vector3(TABLE_WIDTH, 0.075, TABLE_DEPTH), Vector3(0.0, TABLE_HEIGHT, 0.42), Color("#f1eee7"))
