@@ -37,20 +37,34 @@ var mouth_world: Vector3 = Vector3(1, 1.75, 0.88)
 var head_tilt_angle: float = 0.0
 var head_tilt_target: float = 0.0
 
+var eating: bool = false
+var bite_count: int = 0
+var bite_timer: float = 0.0
+const BITE_DURATION: float = 0.3
+const CHOMP_ANGLE: float = 0.26
+const ARM_CHOMP_OFFSET: float = 0.04
+var head_tilt_base: float = 0.0
+var clip_materials: Array[ShaderMaterial] = []
+
 func _ready() -> void:
 	_build_world()
 	_setup_bolt_rig()
 	_update_actual_arm()
 	_set_status("Pick up the hot dog")
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
 	if won:
+		return
+	if eating:
+		_process_eating(delta)
 		return
 	_update_actual_arm()
 	if holding_hotdog and hotdog:
 		hotdog.global_position = _current_hand_world() + Vector3(0.0, -0.025, 0.0)
 
 func _unhandled_input(event: InputEvent) -> void:
+	if eating:
+		return
 	if event is InputEventMouseMotion:
 		hand_target = _screen_to_play_space(event.position)
 	elif event is InputEventScreenTouch:
@@ -304,23 +318,80 @@ func _try_feed_or_release() -> void:
 func _reset_game() -> void:
 	won = false
 	holding_hotdog = false
+	eating = false
+	bite_count = 0
+	bite_timer = 0.0
 	head_tilt_angle = 0.0
 	head_tilt_target = 0.0
 	if hotdog:
 		hotdog.global_position = Vector3(0.0, HOTDOG_Y, HOTDOG_Z)
+		hotdog.visible = true
+	for mat in clip_materials:
+		mat.set_shader_parameter("clip_x", 0.3)
 	hand_target = Vector3(0.0, HOTDOG_Y + 0.02, HOTDOG_Z)
 	_set_status("Pick up the hot dog")
 	if hint_label:
 		hint_label.text = "Move the pointer/finger to move the hand • hold to grab • release near mouth"
+		hint_label.visible = true
 
 func winning_feed() -> void:
-	won = true
+	eating = true
+	bite_count = 0
+	bite_timer = 0.0
+	head_tilt_base = head_tilt_angle
 	holding_hotdog = false
 	if hotdog:
 		hotdog.global_position = mouth_world
+	_set_status("")
+	if hint_label:
+		hint_label.visible = false
+
+func _process_eating(delta: float) -> void:
+	bite_timer += delta
+	var t: float = bite_timer / BITE_DURATION
+
+	if t < 1.0:
+		# Chomp animation phases
+		var chomp_t: float
+		if t < 0.4:
+			# Phase 0: head tilts forward, arm tugs toward mouth
+			chomp_t = t / 0.4
+		elif t < 0.6:
+			# Phase 1: hold — head stays, arm static
+			chomp_t = 1.0
+		else:
+			# Phase 2: head retracts, arm relaxes
+			chomp_t = 1.0 - (t - 0.6) / 0.4
+
+		# Head chomp
+		head_tilt_angle = head_tilt_base + CHOMP_ANGLE * chomp_t
+
+		# Arm tug toward mouth
+		var arm_offset: Vector3 = Vector3(0.0, 0.0, -ARM_CHOMP_OFFSET) * chomp_t
+		hand_target = mouth_world + arm_offset
+
+		# Clip the hotdog: each third instantly vanishes at the start of its bite
+		var clip_x: float = 0.3 - float(bite_count + 1) * 0.2
+		for mat in clip_materials:
+			mat.set_shader_parameter("clip_x", clip_x)
+
+		_update_actual_arm()
+	else:
+		# Bite complete
+		bite_count += 1
+		bite_timer = 0.0
+		if bite_count >= 3:
+			_finish_eating()
+
+func _finish_eating() -> void:
+	eating = false
+	won = true
+	if hotdog:
+		hotdog.visible = false
 	_set_status("Nice. Fed successfully.")
 	if hint_label:
 		hint_label.text = "TAP / CLICK TO PLAY AGAIN"
+		hint_label.visible = true
 
 func _screen_to_play_space(screen: Vector2) -> Vector3:
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
@@ -334,12 +405,42 @@ func _add_hotdog() -> void:
 	hotdog.position = Vector3(0.0, HOTDOG_Y, HOTDOG_Z)
 	add_child(hotdog)
 
+	var clip_shader: Shader = Shader.new()
+	clip_shader.code = """shader_type spatial;
+	uniform vec4 base_color : source_color = vec4(1.0);
+	uniform float clip_x : hint_range(-1.0, 1.0) = 0.3;
+	void fragment() {
+		ALBEDO = base_color.rgb;
+		if (VERTEX.x > clip_x) discard;
+	}"""
+
 	var bun: MeshInstance3D = _ellipsoid(Vector3(0.23, 0.055, 0.075), Vector3.ZERO, Color("#c9853e"))
+	var bun_mat: ShaderMaterial = ShaderMaterial.new()
+	bun_mat.shader = clip_shader
+	bun_mat.set_shader_parameter("base_color", Color("#c9853e"))
+	bun_mat.set_shader_parameter("clip_x", 0.3)
+	bun.material_override = bun_mat
+	clip_materials.append(bun_mat)
 	hotdog.add_child(bun)
+
 	var sausage: MeshInstance3D = _cylinder(0.038, 0.32, Vector3(0.0, 0.018, 0.0), Color("#a73f2f"))
 	sausage.rotation_degrees.z = 90.0
+	var sausage_mat: ShaderMaterial = ShaderMaterial.new()
+	sausage_mat.shader = clip_shader
+	sausage_mat.set_shader_parameter("base_color", Color("#a73f2f"))
+	sausage_mat.set_shader_parameter("clip_x", 0.3)
+	sausage.material_override = sausage_mat
+	clip_materials.append(sausage_mat)
 	hotdog.add_child(sausage)
-	hotdog.add_child(_curve_strip(Vector3.ZERO))
+
+	var mustard: MeshInstance3D = _curve_strip(Vector3.ZERO)
+	var mustard_mat: ShaderMaterial = ShaderMaterial.new()
+	mustard_mat.shader = clip_shader
+	mustard_mat.set_shader_parameter("base_color", Color("#e0ad27"))
+	mustard_mat.set_shader_parameter("clip_x", 0.3)
+	mustard.material_override = mustard_mat
+	clip_materials.append(mustard_mat)
+	hotdog.add_child(mustard)
 
 func _add_ui() -> void:
 	var layer: CanvasLayer = CanvasLayer.new()
