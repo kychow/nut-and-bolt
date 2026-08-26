@@ -8,6 +8,7 @@ const TABLE_HEIGHT: float = 1.016
 const TABLE_WIDTH: float = 1.65
 const TABLE_DEPTH: float = 0.62
 const HOTDOG_Y: float = TABLE_HEIGHT + 0.085
+const HOTDOG_Z: float = 0.3
 const PICKUP_DISTANCE: float = 0.16
 const FEED_DISTANCE: float = 0.20
 const ARM_MAX_REACH: float = 0.72
@@ -19,6 +20,7 @@ var upperarm_idx: int = -1
 var forearm_idx: int = -1
 var hand_idx: int = -1
 var shoulder_idx: int = -1
+var head_idx: int = -1
 var animation_player: AnimationPlayer
 
 var hotdog: Node3D
@@ -26,12 +28,14 @@ var mouth_marker: MeshInstance3D
 var status_label: Label
 var hint_label: Label
 
-var hand_target: Vector3 = Vector3(0.0, HOTDOG_Y + 0.02, 0.42)
+var hand_target: Vector3 = Vector3(0.0, HOTDOG_Y + 0.02, HOTDOG_Z)
 var holding_hotdog: bool = false
 var won: bool = false
 
 var shoulder_world: Vector3 = Vector3.ZERO
 var mouth_world: Vector3 = Vector3(1, 1.75, 0.88)
+var head_tilt_angle: float = 0.0
+var head_tilt_target: float = 0.0
 
 func _ready() -> void:
 	_build_world()
@@ -98,7 +102,7 @@ func _build_world() -> void:
 	_add_ui()
 
 func _add_table() -> void:
-	var top: MeshInstance3D = _box(Vector3(TABLE_WIDTH, 0.075, TABLE_DEPTH), Vector3(0.0, TABLE_HEIGHT, 0.42), Color("#f1eee7"))
+	var top: MeshInstance3D = _box(Vector3(TABLE_WIDTH, 0.075, TABLE_DEPTH), Vector3(0.0, TABLE_HEIGHT, HOTDOG_Z), Color("#f1eee7"))
 	add_child(top)
 
 	for x: float in [-0.61, 0.61]:
@@ -109,7 +113,7 @@ func _add_table() -> void:
 			add_child(foot)
 
 	for x: float in [-0.61, 0.61]:
-		var brace: MeshInstance3D = _box(Vector3(0.025, 0.55, 0.025), Vector3(x, 0.55, 0.42), Color("#a2a09a"))
+		var brace: MeshInstance3D = _box(Vector3(0.025, 0.55, 0.025), Vector3(x, 0.55, HOTDOG_Z), Color("#a2a09a"))
 		brace.rotation_degrees.z = 24.0 * (-1.0 if x < 0.0 else 1.0)
 		add_child(brace)
 
@@ -149,13 +153,13 @@ func _setup_bolt_rig() -> void:
 
 	shoulder_world = _bone_world_position(shoulder_idx)
 
-	# The supplied GLB is ~1.86 m tall. Put the mouth target at the head.
-	var head_idx: int = skeleton.find_bone("head")
-	if head_idx >= 0:
-		var head_pos: Vector3 = _bone_world_position(head_idx)
-		mouth_world = head_pos + Vector3(0.25, 0.215, 0.42)
-		if mouth_marker:
-			mouth_marker.global_position = mouth_world
+	head_idx = skeleton.find_bone("head")
+
+	# Head base position from GLB rest pose (bone at 0, 1.60, 0).
+	# Mouth offset from original code: (0.25, 0.215, HOTDOG_Z) relative to head.
+	mouth_world = Vector3(0.0, 1.60, 0.0) + Vector3(0.0, 0.215, HOTDOG_Z)
+	if mouth_marker:
+		mouth_marker.global_position = mouth_world
 
 func _update_actual_arm() -> void:
 	if skeleton == null or upperarm_idx < 0:
@@ -164,7 +168,7 @@ func _update_actual_arm() -> void:
 	shoulder_world = _bone_world_position(shoulder_idx)
 
 	var target: Vector3 = hand_target
-	target.z = 0.42
+	target.z = HOTDOG_Z
 
 	var shoulder_to_target: Vector3 = target - shoulder_world
 	var target_distance: float = clamp(shoulder_to_target.length(), 0.22, ARM_MAX_REACH)
@@ -195,6 +199,35 @@ func _update_actual_arm() -> void:
 	var hand_pose: Transform3D = skeleton.get_bone_global_pose_no_override(hand_idx)
 	hand_pose.origin = skeleton.global_transform.affine_inverse() * target
 	skeleton.set_bone_global_pose_override(hand_idx, hand_pose, 1.0, true)
+
+	# --- Head tilt: pitch forward as the hand rises ---
+	var tilt_height_min: float = HOTDOG_Y
+	var tilt_height_max: float = HOTDOG_Y + 0.45
+	var tilt_max_deg: float = 30.0
+	var raw: float = clamp((hand_target.y - tilt_height_min) / (tilt_height_max - tilt_height_min), 0.0, 1.0)
+	head_tilt_target = deg_to_rad(tilt_max_deg) * raw
+	head_tilt_angle = lerp(head_tilt_angle, head_tilt_target, 0.12)
+
+	# Apply tilt to the head bone so the mesh visually tilts forward.
+	if head_idx >= 0:
+		var head_pose: Transform3D = skeleton.get_bone_global_pose_no_override(head_idx)
+		head_pose.basis = Basis(Quaternion(Vector3.RIGHT, head_tilt_angle)) * head_pose.basis
+		head_pose.origin = skeleton.global_transform.affine_inverse() * Vector3(0.0, 1.60, 0.0)
+		skeleton.set_bone_global_pose_override(head_idx, head_pose, 1.0, true)
+
+	# Rotate the mouth offset around the head base (X-axis tilt).
+	var head_base: Vector3 = Vector3(0.0, 1.60, 0.0)
+	var mouth_offset: Vector3 = Vector3(0.0, 0.05, 0.15)
+	var cos_t: float = cos(head_tilt_angle)
+	var sin_t: float = sin(head_tilt_angle)
+	var rotated_offset: Vector3 = Vector3(
+		mouth_offset.x,
+		mouth_offset.y * cos_t - mouth_offset.z * sin_t,
+		mouth_offset.y * sin_t + mouth_offset.z * cos_t
+	)
+	mouth_world = head_base + rotated_offset
+	if mouth_marker:
+		mouth_marker.global_position = mouth_world
 
 func _aim_bone_world(bone_idx: int, start_world: Vector3, end_world: Vector3) -> void:
 	var direction_world: Vector3 = (end_world - start_world).normalized()
@@ -271,9 +304,11 @@ func _try_feed_or_release() -> void:
 func _reset_game() -> void:
 	won = false
 	holding_hotdog = false
+	head_tilt_angle = 0.0
+	head_tilt_target = 0.0
 	if hotdog:
-		hotdog.global_position = Vector3(0.0, HOTDOG_Y, 0.42)
-	hand_target = Vector3(0.0, HOTDOG_Y + 0.02, 0.42)
+		hotdog.global_position = Vector3(0.0, HOTDOG_Y, HOTDOG_Z)
+	hand_target = Vector3(0.0, HOTDOG_Y + 0.02, HOTDOG_Z)
 	_set_status("Pick up the hot dog")
 	if hint_label:
 		hint_label.text = "Move the pointer/finger to move the hand • hold to grab • release near mouth"
@@ -291,12 +326,12 @@ func _screen_to_play_space(screen: Vector2) -> Vector3:
 	var viewport_size: Vector2 = get_viewport().get_visible_rect().size
 	var nx: float = (screen.x / viewport_size.x) * 2.0 - 1.0
 	var ny: float = (screen.y / viewport_size.y) * 2.0 - 1.0
-	return Vector3(nx * 0.82, 1.48 - ny * 0.55, 0.42)
+	return Vector3(nx * 0.82, 1.48 - ny * 0.55, HOTDOG_Z)
 
 func _add_hotdog() -> void:
 	hotdog = Node3D.new()
 	hotdog.name = "HotDog"
-	hotdog.position = Vector3(0.0, HOTDOG_Y, 0.42)
+	hotdog.position = Vector3(0.0, HOTDOG_Y, HOTDOG_Z)
 	add_child(hotdog)
 
 	var bun: MeshInstance3D = _ellipsoid(Vector3(0.23, 0.055, 0.075), Vector3.ZERO, Color("#c9853e"))
